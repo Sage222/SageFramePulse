@@ -7,6 +7,7 @@ import {
   ShieldCheck,
   Sliders,
   Gauge,
+  Download,
 } from 'lucide-react';
 import {
   BenchmarkConfig,
@@ -22,6 +23,7 @@ import {
 import { GpuBenchmarkRenderer } from './utils/gpuRenderer';
 import { TelemetryCharts } from './components/TelemetryCharts';
 import { BenchmarkRunHistory } from './components/BenchmarkRunHistory';
+import { buildStandaloneBenchmarkHtml } from './utils/standaloneHtmlBuilder';
 
 const INITIAL_BUCKETS: FrameDistributionBuckets = {
   under4ms: 0,
@@ -103,8 +105,23 @@ export default function App() {
   });
 
   const [history, setHistory] = useState<FrameTimeHistoryPoint[]>([]);
-  const [runRecords, setRunRecords] = useState<BenchmarkRunRecord[]>([]);
+  const [runRecords, setRunRecords] = useState<BenchmarkRunRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('framepulse_run_records_v1');
+      return saved ? (JSON.parse(saved) as BenchmarkRunRecord[]) : [];
+    } catch {
+      return [];
+    }
+  });
   const [lastCompletedBanner, setLastCompletedBanner] = useState<BenchmarkRunRecord | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('framepulse_run_records_v1', JSON.stringify(runRecords));
+    } catch {
+      // Ignore storage quota errors in restricted environments
+    }
+  }, [runRecords]);
 
   // Refs for precision animation loop without React state closure lag
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -664,6 +681,20 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  // Download self-contained standalone HTML benchmark file for Windows 10/11 double-click usage
+  const handleDownloadStandaloneHtml = () => {
+    const htmlString = buildStandaloneBenchmarkHtml();
+    const blob = new Blob([htmlString], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'FramePulse-Standalone.html';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const progress60sPercent =
     config.mode === 'benchmark_60s'
       ? Math.min(100, (telemetry.elapsedSeconds / 60.0) * 100)
@@ -1152,6 +1183,21 @@ export default function App() {
                     </p>
                   </div>
                 </label>
+
+                {/* Windows 10 / 11 Portable Double-Clickable Standalone HTML Export */}
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadStandaloneHtml}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 text-xs font-semibold rounded-md bg-[#111827] hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download Standalone .HTML (Double-Clickable)
+                  </button>
+                  <p className="text-[11px] text-slate-500 mt-1 text-center">
+                    Zero-dependency single file · Opens directly on Windows 10/11 without Node.js
+                  </p>
+                </div>
               </div>
             </div>
           </div>

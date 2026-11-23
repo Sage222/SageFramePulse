@@ -6,6 +6,17 @@ FramePulse is a browser-based HTML5 and WebGL2 GPU benchmark instrument designed
 
 ---
 
+## Windows 10 / 11 Quick Start (No Installation Required)
+
+After downloading or cloning this repository to your Windows PC, you do **not** need to install Node.js or run terminal commands:
+
+1. Open the downloaded folder in **Windows File Explorer**.
+2. Double-click **`FramePulse-Standalone.html`** (or double-click **`index.html`**, which automatically detects the local `file://` protocol and opens `FramePulse-Standalone.html` for you).
+3. It will open immediately in your default web browser (Chrome, Edge, Brave, or Firefox) in a **STOPPED (`0% GPU Load`)** state, ready to test your 3rd-party FPS limiter or run a 60-second overclock stability benchmark.
+4. *(Optional)* You can also click **"Download Standalone .HTML"** inside the left control panel of the web app to save a portable single-file copy directly to your Windows Desktop.
+
+---
+
 ## Key Features
 
 - **Starts in a Stopped (0% Load) State**: When opened, the WebGL2 render loop is completely paused so your system uses zero GPU resources until you explicitly click **Start** or **Run 60s Overclock Benchmark**.
@@ -47,7 +58,9 @@ FramePulse is a browser-based HTML5 and WebGL2 GPU benchmark instrument designed
 
 ---
 
-## Local Development
+## Optional Developer Server (Node.js / Vite)
+
+If you are editing the TypeScript source files inside `/src`:
 
 ```bash
 # Install dependencies

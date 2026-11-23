@@ -1,0 +1,1138 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FramePulse — Standalone HTML5 WebGL2 GPU & FPS Benchmark</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-canvas: #07090E;
+      --bg-panel: #0B0E17;
+      --bg-surface: #111827;
+      --border: #1E293B;
+      --border-light: #334155;
+      --text-main: #F1F5F9;
+      --text-muted: #94A3B8;
+      --text-dim: #64748B;
+      --cyan: #06B6D4;
+      --cyan-light: #22D3EE;
+      --amber: #F59E0B;
+      --amber-light: #FBBF24;
+      --emerald: #10B981;
+      --rose: #E11D48;
+      --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg-canvas);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+    .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 2rem;
+      padding: 0.85rem 1.5rem;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand {
+      font-size: 1.125rem;
+      font-weight: 700;
+      color: var(--text-main);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .nav-links a:hover { color: var(--text-main); }
+    .ribbon {
+      background: rgba(11, 14, 23, 0.8);
+      border-bottom: 1px solid var(--border);
+      padding: 0.5rem 1.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      font-size: 0.75rem;
+    }
+    .container {
+      max-width: 1440px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+    .split-grid {
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      gap: 1.25rem;
+      align-items: stretch;
+    }
+    @media (max-width: 1024px) {
+      .split-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+    }
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 1.25rem;
+    }
+    .section-divider {
+      border-top: 1px solid var(--border);
+      padding-top: 1rem;
+      margin-top: 1rem;
+    }
+    .label-caps {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.625rem; }
+    button {
+      font-family: var(--font-sans);
+      cursor: pointer;
+      border-radius: 0.375rem;
+      transition: all 0.15s ease;
+      font-weight: 600;
+      border: 1px solid transparent;
+    }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .btn-start {
+      background: var(--cyan-light);
+      color: #020617;
+      padding: 0.625rem 1rem;
+      font-size: 0.875rem;
+    }
+    .btn-start:hover:not(:disabled) { background: #67E8F9; }
+    .btn-stop {
+      background: var(--rose);
+      color: #FFFFFF;
+      padding: 0.625rem 1rem;
+      font-size: 0.875rem;
+    }
+    .btn-stop:hover:not(:disabled) { background: #F43F5E; }
+    .btn-60s {
+      background: var(--bg-surface);
+      color: var(--amber-light);
+      border-color: rgba(245, 158, 11, 0.45);
+      padding: 0.55rem 0.75rem;
+      font-size: 0.75rem;
+      width: 100%;
+    }
+    .btn-60s:hover { background: #1E293B; }
+    .btn-choice {
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      border-color: var(--border);
+      padding: 0.4rem 0.5rem;
+      font-size: 0.75rem;
+    }
+    .btn-choice:hover { color: var(--text-main); border-color: var(--border-light); }
+    .btn-choice.active {
+      background: rgba(6, 182, 212, 0.18);
+      color: #67E8F9;
+      border-color: rgba(6, 182, 212, 0.55);
+    }
+    .btn-choice.active-amber {
+      background: rgba(245, 158, 11, 0.18);
+      color: #FCD34D;
+      border-color: rgba(245, 158, 11, 0.55);
+    }
+    .cap-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.375rem; margin-bottom: 0.5rem; }
+    .preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.375rem; margin-bottom: 0.5rem; }
+    .scale-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.375rem; }
+    input[type="text"], input[type="number"], select {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-light);
+      color: var(--text-main);
+      border-radius: 0.375rem;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.75rem;
+      width: 100%;
+    }
+    input[type="range"] { width: 100%; accent-color: var(--cyan-light); cursor: pointer; }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+    }
+    @media (max-width: 768px) {
+      .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .kpi-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .kpi-val-lg { font-size: 2.25rem; font-weight: 700; line-height: 1.1; }
+    .kpi-val-md { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+    .viewport-wrap {
+      position: relative;
+      flex: 1;
+      min-height: 410px;
+      background: #05070B;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas#glCanvas { width: 100%; height: 100%; display: block; object-fit: cover; }
+    .hud-tl {
+      position: absolute;
+      top: 0.75rem;
+      left: 0.75rem;
+      background: rgba(7, 9, 14, 0.86);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.75rem;
+      pointer-events: none;
+    }
+    .standby-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(7, 9, 14, 0.78);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .standby-card {
+      max-width: 440px;
+      width: 100%;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 1.5rem;
+      text-align: center;
+    }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 1024px) {
+      .charts-grid { grid-template-columns: 1fr; }
+    }
+    .progress-track {
+      width: 100%;
+      height: 0.5rem;
+      background: var(--bg-surface);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-fill { height: 100%; transition: width 0.12s linear; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+    th {
+      text-align: left;
+      padding: 0.6rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    td {
+      padding: 0.6rem 0.5rem;
+      border-bottom: 1px solid rgba(30, 41, 59, 0.6);
+    }
+    .text-right { text-align: right; }
+    .text-cyan { color: var(--cyan-light); }
+    .text-amber { color: var(--amber-light); }
+    .text-emerald { color: var(--emerald); }
+    .text-rose { color: #FB7185; }
+    .text-muted { color: var(--text-muted); }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="#viewport" class="brand">FramePulse</a>
+    <nav class="nav-links">
+      <a href="#viewport">Stress Viewport</a>
+      <a href="#oscilloscope">Oscilloscope</a>
+      <a href="#run-log">Overclock Log</a>
+      <a href="#calibration-guide">Calibration Guide</a>
+    </nav>
+    <div>
+      <button id="topToggleBtn" class="btn-start" type="button">Start Benchmark</button>
+    </div>
+  </header>
+
+  <div class="ribbon mono">
+    <div>
+      <span>STATE: </span>
+      <strong id="stateLabel" class="text-amber">■ STOPPED (STANDBY · 0% GPU LOAD)</strong>
+      <span> · </span>
+      <span id="gpuNameLabel" class="text-muted">GPU: Detecting WebGL2 Adapter...</span>
+    </div>
+    <div>
+      <span>BUFFER: <strong id="resLabel">1280×720</strong></span>
+      <span> · </span>
+      <span>WATCHDOG: <strong id="watchdogStatusLabel" class="text-emerald">ARMED (&lt;58ms SAFE)</strong></span>
+    </div>
+  </div>
+
+  <main class="container">
+    <section id="viewport" class="split-grid">
+      <!-- Left Parameter & Execution Column -->
+      <div class="panel" style="display:flex;flex-direction:column;justify-content:space-between;">
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+            <span class="label-caps" style="margin:0;">Execution Control</span>
+            <span id="elapsedHeaderLabel" class="mono text-muted" style="font-size:0.75rem;">Idle / Ready</span>
+          </div>
+
+          <div class="btn-row">
+            <button id="btnStart" type="button" class="btn-start">▶ Start</button>
+            <button id="btnStop" type="button" class="btn-stop" disabled>■ Stop</button>
+          </div>
+
+          <div style="display:flex;gap:0.5rem;margin-top:0.625rem;">
+            <button id="btnRun60s" type="button" class="btn-60s">⏱ Run 60s Overclock Benchmark</button>
+            <button id="btnReset" type="button" class="btn-choice" title="Reset counters" style="padding:0.5rem 0.75rem;">↺</button>
+          </div>
+
+          <!-- Operating Mode -->
+          <div class="section-divider">
+            <span class="label-caps">Benchmark Operating Mode</span>
+            <div class="btn-row">
+              <button id="modeFreeBtn" type="button" class="btn-choice active">Continuous FPS Probe</button>
+              <button id="mode60sBtn" type="button" class="btn-choice">60s Overclock Stress</button>
+            </div>
+          </div>
+
+          <!-- 3rd Party FPS Limiter Reference -->
+          <div class="section-divider">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.25rem;">
+              <span class="label-caps" style="margin:0;">3rd-Party FPS Limiter Reference</span>
+              <span id="targetRefSummary" class="mono text-cyan" style="font-size:0.75rem;">144 FPS (6.94 ms)</span>
+            </div>
+            <p class="text-muted" style="font-size:0.72rem;margin-bottom:0.5rem;">
+              Select the FPS cap set in your external tool (RTSS, NVIDIA/AMD Driver, Special K):
+            </p>
+            <div class="cap-grid" id="capButtonsContainer">
+              <button type="button" data-cap="off" class="btn-choice mono">Off</button>
+              <button type="button" data-cap="30" class="btn-choice mono">30</button>
+              <button type="button" data-cap="60" class="btn-choice mono">60</button>
+              <button type="button" data-cap="90" class="btn-choice mono">90</button>
+              <button type="button" data-cap="120" class="btn-choice mono">120</button>
+              <button type="button" data-cap="144" class="btn-choice mono active">144</button>
+              <button type="button" data-cap="165" class="btn-choice mono">165</button>
+              <button type="button" data-cap="240" class="btn-choice mono">240</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+              <span class="text-muted" style="font-size:0.75rem;white-space:nowrap;">Custom Target FPS:</span>
+              <input id="customCapInput" type="number" min="10" max="1000" value="144" class="mono" style="width:90px;" />
+            </div>
+          </div>
+
+          <!-- GPU Workload Intensity -->
+          <div class="section-divider">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+              <span class="label-caps" style="margin:0;">GPU Stress Intensity</span>
+              <span id="workloadSummary" class="mono text-muted" style="font-size:0.75rem;">26 Steps · 100%</span>
+            </div>
+            <div class="preset-grid" id="presetButtonsContainer">
+              <button type="button" data-preset="light" class="btn-choice">Light</button>
+              <button type="button" data-preset="balanced" class="btn-choice active">Balanced</button>
+              <button type="button" data-preset="heavy" class="btn-choice">Heavy</button>
+            </div>
+            <div style="margin-top:0.6rem;">
+              <label class="text-muted" style="font-size:0.72rem;display:block;margin-bottom:0.25rem;">Shader Compute Kernel</label>
+              <select id="sceneSelect">
+                <option value="0">Volumetric Gyroid Lattice (Ray-Marched 3D)</option>
+                <option value="1">Trigonometric Plasma Manifold (Heavy ALU)</option>
+                <option value="2">Infinite Prism Matrix (Distance Field)</option>
+              </select>
+            </div>
+            <div style="margin-top:0.6rem;">
+              <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:0.2rem;">
+                <span class="text-muted">Shader Iterations (Safe Cap: 56)</span>
+                <span id="stepsValueLabel" class="mono text-cyan">26 steps</span>
+              </div>
+              <input id="stepsSlider" type="range" min="8" max="56" step="2" value="26" />
+            </div>
+            <div style="margin-top:0.6rem;">
+              <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:0.25rem;">
+                <span class="text-muted">Internal Resolution Scale</span>
+                <span id="scaleValueLabel" class="mono text-muted">100%</span>
+              </div>
+              <div class="scale-grid" id="scaleButtonsContainer">
+                <button type="button" data-scale="0.5" class="btn-choice mono">50%</button>
+                <button type="button" data-scale="0.75" class="btn-choice mono">75%</button>
+                <button type="button" data-scale="1" class="btn-choice mono active">100%</button>
+                <button type="button" data-scale="1.25" class="btn-choice mono">125%</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Overclock Profile Label & Watchdog -->
+          <div class="section-divider">
+            <span class="label-caps">Overclock / Limiter Profile Label</span>
+            <input id="profileInput" type="text" value="Stock GPU Profile" placeholder="e.g. +150 MHz Core / +500 MHz VRAM" />
+            <label style="display:flex;align-items:flex-start;gap:0.5rem;margin-top:0.75rem;padding:0.6rem;background:var(--bg-surface);border:1px solid var(--border);border-radius:0.375rem;cursor:pointer;font-size:0.72rem;">
+              <input id="watchdogCheckbox" type="checkbox" checked style="margin-top:0.15rem;accent-color:var(--cyan-light);" />
+              <span>
+                <strong style="color:var(--text-main);display:block;">PC Responsiveness Guard (Anti-Freeze Watchdog)</strong>
+                <span class="text-muted">Automatically steps down shader depth if frame delta exceeds 58 ms (&lt;17 FPS) so Windows stays responsive.</span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: KPI Strip + WebGL2 Stress Viewport -->
+      <div style="display:flex;flex-direction:column;gap:1rem;">
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="label-caps" style="margin:0;">CURRENT FPS</span>
+            <div style="margin-top:0.35rem;">
+              <span id="kpiCurrentFps" class="mono kpi-val-lg text-muted">0.0</span>
+              <span class="mono text-muted" style="font-size:0.75rem;margin-left:0.25rem;">FPS</span>
+            </div>
+            <div id="kpiFrameTime" class="mono text-muted" style="font-size:0.75rem;margin-top:0.35rem;">STANDBY (STOPPED)</div>
+          </div>
+
+          <div class="kpi-card">
+            <span class="label-caps" style="margin:0;">LIMITER ACCURACY</span>
+            <div style="margin-top:0.35rem;">
+              <span id="kpiDeviation" class="mono kpi-val-md">—</span>
+              <span id="kpiTargetSub" class="mono text-muted" style="font-size:0.75rem;margin-left:0.25rem;">vs 144</span>
+            </div>
+            <div id="kpiLockStatus" class="mono text-muted" style="font-size:0.75rem;margin-top:0.35rem;">Awaiting Start</div>
+          </div>
+
+          <div class="kpi-card">
+            <span class="label-caps" style="margin:0;">AVERAGE FPS</span>
+            <div style="margin-top:0.35rem;">
+              <span id="kpiAvgFps" class="mono kpi-val-md">0.0</span>
+              <span class="mono text-muted" style="font-size:0.75rem;margin-left:0.25rem;">FPS</span>
+            </div>
+            <div id="kpiMinMax" class="mono text-muted" style="font-size:0.75rem;margin-top:0.35rem;">MIN 0 · MAX 0</div>
+          </div>
+
+          <div class="kpi-card">
+            <span class="label-caps" style="margin:0;">1% / 0.1% LOWS</span>
+            <div style="margin-top:0.35rem;">
+              <span id="kpiLow1" class="mono kpi-val-md">0.0</span>
+              <span id="kpiLow01" class="mono text-muted" style="font-size:0.75rem;margin-left:0.25rem;">/ 0.0</span>
+            </div>
+            <div id="kpiJitter" class="mono text-muted" style="font-size:0.75rem;margin-top:0.35rem;">JITTER: ±0.00 ms</div>
+          </div>
+        </div>
+
+        <!-- 60s Benchmark Progress Bar -->
+        <div id="bar60sWrap" class="panel hidden" style="padding:0.75rem 1rem;">
+          <div class="mono" style="display:flex;justify-content:space-between;font-size:0.75rem;margin-bottom:0.4rem;">
+            <span class="text-amber" style="font-weight:600;">60-SECOND OVERCLOCK STABILITY PASS</span>
+            <span id="bar60sText">0.0s / 60.0s (60.0s remaining)</span>
+          </div>
+          <div class="progress-track">
+            <div id="bar60sFill" class="progress-fill" style="width:0%;background:var(--amber);"></div>
+          </div>
+        </div>
+
+        <!-- WebGL2 Canvas Viewport -->
+        <div id="viewportContainer" class="viewport-wrap">
+          <canvas id="glCanvas"></canvas>
+          <div class="hud-tl mono">
+            <div><strong>FPS: <span id="hudFps" class="text-cyan">0.0 (STOPPED)</span> · <span id="hudMs" class="text-amber">0.00 ms</span></strong></div>
+            <div id="hudSub" class="text-muted" style="font-size:0.68rem;">SHADER: 26 steps · FRAMES: 0</div>
+          </div>
+
+          <div id="standbyOverlay" class="standby-overlay">
+            <div class="standby-card">
+              <div class="mono text-amber" style="font-size:0.72rem;margin-bottom:0.5rem;">■ BENCHMARK STOPPED — GPU IDLE (0% LOAD)</div>
+              <h2 style="font-size:1.2rem;margin-bottom:0.5rem;">Ready for Frame Limiter & Overclock Testing</h2>
+              <p class="text-muted" style="font-size:0.75rem;margin-bottom:1rem;">
+                The WebGL2 shader loop is paused so your PC uses zero GPU resources until started. Choose a continuous run to test your 3rd-party FPS limiter or a timed 60-second pass to test GPU overclock stability.
+              </p>
+              <div class="btn-row">
+                <button id="overlayStartFreeBtn" type="button" class="btn-start" style="font-size:0.75rem;">▶ Start Free Run</button>
+                <button id="overlayStart60sBtn" type="button" class="btn-60s">⏱ Start 60s Benchmark</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Oscilloscope & Frame Distribution Histogram -->
+    <section id="oscilloscope" class="charts-grid">
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+          <div>
+            <h3 style="font-size:0.875rem;font-weight:600;">Real-Time Frame Pacing Oscilloscope</h3>
+            <p id="oscSubtitle" class="text-muted" style="font-size:0.75rem;">Rolling 150-sample FPS waveform · Green dashed line indicates 3rd-Party Limiter Target Cap</p>
+          </div>
+        </div>
+        <svg id="oscSvg" viewBox="0 0 680 165" style="width:100%;height:175px;display:block;"></svg>
+      </div>
+
+      <div class="panel" style="display:flex;flex-direction:column;justify-content:space-between;">
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.25rem;">
+            <h3 style="font-size:0.875rem;font-weight:600;">Frame Pacing Distribution</h3>
+            <span id="totalFramesLabel" class="mono text-muted" style="font-size:0.75rem;">0 frames</span>
+          </div>
+          <p class="text-muted" style="font-size:0.72rem;margin-bottom:0.75rem;">Latency consistency breakdown across hardware refresh tiers</p>
+          <div id="bucketsContainer" style="display:flex;flex-direction:column;gap:0.6rem;"></div>
+        </div>
+        <div class="mono text-muted" style="font-size:0.72rem;border-top:1px solid var(--border);padding-top:0.5rem;margin-top:0.75rem;display:flex;justify-content:space-between;">
+          <span>60 Hz: 16.67 ms</span>
+          <span>144 Hz: 6.94 ms</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Overclock & Frame Limiter Benchmark Log -->
+    <section id="run-log" class="panel">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
+        <div>
+          <h3 style="font-size:0.875rem;font-weight:600;">Overclock & Frame Limiter Benchmark Log</h3>
+          <p class="text-muted" style="font-size:0.75rem;">Compare 60-second overclock runs and 3rd-party FPS limiter lock consistency</p>
+        </div>
+        <div style="display:flex;gap:0.5rem;">
+          <button id="btnExportCsv" type="button" class="btn-choice">Export CSV</button>
+          <button id="btnClearLog" type="button" class="btn-choice">Clear Log</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr class="mono">
+              <th>Profile / Timestamp</th>
+              <th>Mode & Load</th>
+              <th class="text-right">Target Cap</th>
+              <th class="text-right">Avg FPS</th>
+              <th class="text-right">1% Low</th>
+              <th class="text-right">0.1% Low</th>
+              <th class="text-right">Avg Delta</th>
+              <th class="text-right">Jitter (σ)</th>
+              <th class="text-right">Stutters</th>
+            </tr>
+          </thead>
+          <tbody id="runLogBody" class="mono">
+            <tr><td colspan="9" class="text-muted" style="text-align:center;padding:1.5rem;">No completed benchmark runs recorded yet. Press Start or Run 60s Overclock Benchmark above.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Calibration Guide -->
+    <section id="calibration-guide" class="panel">
+      <h3 style="font-size:0.875rem;font-weight:600;margin-bottom:0.5rem;">Windows 10 / 11 Usage Guide</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;font-size:0.75rem;" class="text-muted">
+        <div>
+          <strong style="color:var(--text-main);display:block;margin-bottom:0.2rem;">01. Testing 3rd-Party FPS Limiters</strong>
+          Set your external frame limiter (RTSS, NVIDIA Control Panel Max Frame Rate, or AMD Chill) to cap your browser or global 3D profile, select the matching FPS cap on the left, set intensity to Light, and press Start.
+        </div>
+        <div>
+          <strong style="color:var(--text-main);display:block;margin-bottom:0.2rem;">02. 60-Second Overclock Stability Pass</strong>
+          Choose Balanced or Heavy intensity, label your clock profile (e.g. Stock vs +150 MHz Core), and click Run 60s Overclock Benchmark to log and compare 1% Lows and frame pacing jitter.
+        </div>
+        <div>
+          <strong style="color:var(--text-main);display:block;margin-bottom:0.2rem;">03. Anti-Freeze Watchdog Protection</strong>
+          Per-frame ray-marching is bounded to a safe ceiling of 56 steps and automatically steps down if frame time exceeds 58 ms (&lt;17 FPS), ensuring Windows and your mouse cursor never become unresponsive.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function() {
+      // State — always starts STOPPED
+      var status = 'stopped';
+      var config = {
+        mode: 'free_run',
+        preset: 'balanced',
+        scene: 0,
+        shaderIterations: 26,
+        resolutionScale: 1.0,
+        referenceTargetFps: 144,
+        watchdogEnabled: true,
+        clockProfileLabel: 'Stock GPU Profile'
+      };
+
+      var rafId = null;
+      var startTimeMs = 0;
+      var lastFrameMs = 0;
+      var lastUiSyncMs = 0;
+      var allDeltas = [];
+      var recentDeltas = [];
+      var buckets = { under4: 0, ms4to8: 0, ms8to16: 0, ms16to33: 0, over33: 0 };
+      var stutterCount = 0;
+      var effectiveSteps = 26;
+      var consecutiveSlow = 0;
+      var watchdogTriggers = 0;
+      var watchdogActive = false;
+      var history = [];
+      var runRecords = [];
+
+      // WebGL Setup
+      var canvas = document.getElementById('glCanvas');
+      var container = document.getElementById('viewportContainer');
+      var gl = canvas.getContext('webgl2', { alpha: false, antialias: false, powerPreference: 'high-performance' }) ||
+               canvas.getContext('webgl', { alpha: false, antialias: false, powerPreference: 'high-performance' });
+
+      var vsSource = 'attribute vec2 a_pos; void main(){ gl_Position = vec4(a_pos, 0.0, 1.0); }';
+      var fsSource = [
+        'precision highp float;',
+        'uniform vec2 u_res;',
+        'uniform float u_time;',
+        'uniform int u_iter;',
+        'uniform int u_scene;',
+        'mat2 rot(float a){ float s=sin(a), c=cos(a); return mat2(c,-s,s,c); }',
+        'float mapLattice(vec3 p, float t){',
+        '  vec3 q=p; q.xy*=rot(t*0.15); q.yz*=rot(t*0.11);',
+        '  float g=abs(dot(sin(q*2.4),cos(q.zxy*2.4)))/2.4;',
+        '  float b=length(max(abs(fract(q*0.5)-0.5)-0.16,0.0));',
+        '  return mix(g-0.08,b,0.35);',
+        '}',
+        'float mapMatrix(vec3 p, float t){',
+        '  vec3 q=p; q.xz*=rot(t*0.12);',
+        '  vec3 id=floor(q*1.25); vec3 l=fract(q*1.25)-0.5;',
+        '  float w=sin(id.x*1.7+id.z*1.3+t*2.2)*0.12;',
+        '  vec3 b=abs(l)-vec3(0.22+w*0.3,0.28,0.22-w*0.3);',
+        '  return (length(max(b,0.0))+min(max(b.x,max(b.y,b.z)),0.0))/1.25;',
+        '}',
+        'void main(){',
+        '  vec2 uv=(gl_FragCoord.xy-0.5*u_res)/min(u_res.y,u_res.x);',
+        '  float t=u_time;',
+        '  if(u_scene==1){',
+        '    vec3 col=vec3(0.0); vec2 p=uv*2.2; float amp=0.65, freq=1.8;',
+        '    for(int i=0;i<60;i++){',
+        '      if(i>=u_iter) break;',
+        '      float fi=float(i);',
+        '      p+=vec2(sin(p.y*freq+t*1.1+fi*0.37),cos(p.x*freq-t*0.9+fi*0.53))*(amp/freq);',
+        '      float h=sin(dot(p,vec2(cos(fi*0.4),sin(fi*0.4)))*2.5+t);',
+        '      vec3 lc=0.5+0.5*cos(vec3(0.15,0.45,0.85)*fi*0.25+h+vec3(0.0,1.8,3.6));',
+        '      col+=lc*exp(-abs(h)*1.6); freq*=1.035; amp*=0.965;',
+        '    }',
+        '    col/=max(float(u_iter)*0.32,1.0);',
+        '    gl_FragColor=vec4(pow(clamp(col,0.0,1.0),vec3(0.92)),1.0); return;',
+        '  }',
+        '  vec3 ro=vec3(0.0,0.0,-3.2+sin(t*0.4)*0.3);',
+        '  vec3 rd=normalize(vec3(uv,1.15)); rd.xy*=rot(sin(t*0.2)*0.15);',
+        '  float td=0.0, hit=0.0; vec3 glow=vec3(0.0);',
+        '  for(int i=0;i<60;i++){',
+        '    if(i>=u_iter) break;',
+        '    vec3 p=ro+rd*td;',
+        '    float d=(u_scene==0)?mapLattice(p,t):mapMatrix(p,t);',
+        '    vec3 st=(u_scene==0)?vec3(0.03,0.68,0.88)+0.25*cos(vec3(1.0,2.0,3.0)+p.z*0.8+t):vec3(0.18,0.55,0.95)+0.25*sin(vec3(2.5,1.2,0.4)+p.y*1.1-t);',
+        '    glow+=st*(0.014/(0.025+d*d*4.5));',
+        '    if(abs(d)<0.0025){ hit=1.0-float(i)/float(u_iter); break; }',
+        '    td+=max(abs(d)*0.62,0.018); if(td>14.0) break;',
+        '  }',
+        '  vec3 col=mix(vec3(0.03,0.05,0.09),vec3(0.08,0.55,0.82),hit)+glow*0.55;',
+        '  col=col/(1.0+col*0.45);',
+        '  gl_FragColor=vec4(pow(clamp(col,0.0,1.0),vec3(0.9)),1.0);',
+        '}'
+      ].join('\n');
+
+      var uRes = null, uTime = null, uIter = null, uScene = null;
+      if (gl) {
+        var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+        var gpuStr = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+        document.getElementById('gpuNameLabel').textContent = 'GPU: ' + (gpuStr || 'WebGL Hardware Adapter');
+
+        function compile(type, src) {
+          var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s;
+        }
+        var prog = gl.createProgram();
+        gl.attachShader(prog, compile(gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(prog); gl.useProgram(prog);
+
+        var buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+        var loc = gl.getAttribLocation(prog, 'a_pos');
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+        uRes = gl.getUniformLocation(prog, 'u_res');
+        uTime = gl.getUniformLocation(prog, 'u_time');
+        uIter = gl.getUniformLocation(prog, 'u_iter');
+        uScene = gl.getUniformLocation(prog, 'u_scene');
+      }
+
+      function resizeCanvas() {
+        var r = container.getBoundingClientRect();
+        var w = Math.max(320, Math.floor((r.width || 900) * config.resolutionScale));
+        var h = Math.max(220, Math.floor((r.height || 410) * config.resolutionScale));
+        canvas.width = w; canvas.height = h;
+        if (gl) gl.viewport(0, 0, w, h);
+        document.getElementById('resLabel').textContent = w + '×' + h;
+        if (status !== 'running') drawFrame(2.4, Math.min(8, config.shaderIterations));
+      }
+
+      function drawFrame(tSec, iterCount) {
+        if (!gl) return;
+        gl.uniform2f(uRes, canvas.width, canvas.height);
+        gl.uniform1f(uTime, tSec);
+        gl.uniform1i(uIter, Math.max(4, Math.min(56, iterCount)));
+        gl.uniform1i(uScene, config.scene);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+
+      window.addEventListener('resize', resizeCanvas);
+      resizeCanvas();
+
+      function computeStats() {
+        if (allDeltas.length === 0) {
+          return { curFps: 0, ms: 0, avgFps: 0, minFps: 0, maxFps: 0, low1: 0, low01: 0, jitter: 0 };
+        }
+        var rSum = 0;
+        for (var i = 0; i < recentDeltas.length; i++) rSum += recentDeltas[i];
+        var rAvg = rSum / recentDeltas.length;
+        var curFps = rAvg > 0 ? 1000 / rAvg : 0;
+
+        var vSum = 0;
+        for (var j = 0; j < recentDeltas.length; j++) {
+          var d = recentDeltas[j] - rAvg; vSum += d * d;
+        }
+        var jitter = recentDeltas.length > 1 ? Math.sqrt(vSum / recentDeltas.length) : 0;
+
+        var totMs = 0, minD = Infinity, maxD = 0;
+        for (var k = 0; k < allDeltas.length; k++) {
+          var dk = allDeltas[k]; totMs += dk;
+          if (dk < minD) minD = dk;
+          if (dk > maxD) maxD = dk;
+        }
+        var avgMs = totMs / allDeltas.length;
+        var avgFps = avgMs > 0 ? 1000 / avgMs : 0;
+        var sorted = allDeltas.slice().sort(function(a, b) { return b - a; });
+        var c1 = Math.max(1, Math.ceil(sorted.length * 0.01));
+        var c01 = Math.max(1, Math.ceil(sorted.length * 0.001));
+        var s1 = 0, s01 = 0;
+        for (var m = 0; m < c1; m++) s1 += sorted[m];
+        for (var n = 0; n < c01; n++) s01 += sorted[n];
+
+        return {
+          curFps: curFps,
+          ms: rAvg,
+          avgFps: avgFps,
+          minFps: maxD > 0 ? 1000 / maxD : 0,
+          maxFps: minD > 0 ? 1000 / minD : 0,
+          low1: 1000 / (s1 / c1),
+          low01: 1000 / (s01 / c01),
+          jitter: jitter
+        };
+      }
+
+      function renderOscilloscope() {
+        var svg = document.getElementById('oscSvg');
+        var w = 680, h = 165, padL = 42, padR = 14, padT = 14, padB = 22;
+        var pw = w - padL - padR, ph = h - padT - padB;
+        var maxFps = 144;
+        if (config.referenceTargetFps) maxFps = Math.max(120, config.referenceTargetFps * 1.25);
+        for (var i = 0; i < history.length; i++) {
+          if (history[i].fps * 1.15 > maxFps) maxFps = Math.ceil((history[i].fps * 1.15) / 30) * 30;
+        }
+
+        var out = [];
+        var steps = [0, 0.25, 0.5, 0.75, 1];
+        for (var s = 0; s < steps.length; s++) {
+          var y = padT + ph - steps[s] * ph;
+          var val = Math.round(steps[s] * maxFps);
+          out.push('<line x1="' + padL + '" y1="' + y + '" x2="' + (padL + pw) + '" y2="' + y + '" stroke="#1E293B" stroke-width="1"/>');
+          out.push('<text x="' + (padL - 6) + '" y="' + (y + 4) + '" text-anchor="end" fill="#64748B" font-size="10" font-family="monospace">' + val + '</text>');
+        }
+
+        if (config.referenceTargetFps && config.referenceTargetFps <= maxFps) {
+          var ry = padT + ph - (config.referenceTargetFps / maxFps) * ph;
+          out.push('<line x1="' + padL + '" y1="' + ry + '" x2="' + (padL + pw) + '" y2="' + ry + '" stroke="#10B981" stroke-width="1.5" stroke-dasharray="5 4"/>');
+        }
+
+        if (history.length > 1) {
+          var pts = [];
+          for (var idx = 0; idx < history.length; idx++) {
+            var x = padL + (idx / (history.length - 1)) * pw;
+            var cy = padT + ph - (Math.min(maxFps, history[idx].fps) / maxFps) * ph;
+            pts.push((idx === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + cy.toFixed(1));
+          }
+          out.push('<path d="' + pts.join(' ') + '" fill="none" stroke="#06B6D4" stroke-width="2"/>');
+        } else {
+          out.push('<text x="' + (padL + pw / 2) + '" y="' + (padT + ph / 2) + '" text-anchor="middle" fill="#64748B" font-size="12" font-family="monospace">STANDBY — Press Start to capture real-time frame pacing waveform</text>');
+        }
+        svg.innerHTML = out.join('');
+      }
+
+      function renderBuckets() {
+        var tot = allDeltas.length;
+        document.getElementById('totalFramesLabel').textContent = tot.toLocaleString() + ' frames';
+        var list = [
+          { label: '< 4.0 ms (>250 FPS)', count: buckets.under4, color: '#22D3EE' },
+          { label: '4.0 – 8.0 ms (125–250 FPS)', count: buckets.ms4to8, color: '#06B6D4' },
+          { label: '8.0 – 16.7 ms (60–125 FPS)', count: buckets.ms8to16, color: '#3B82F6' },
+          { label: '16.7 – 33.3 ms (30–60 FPS)', count: buckets.ms16to33, color: '#F59E0B' },
+          { label: '> 33.3 ms (<30 FPS)', count: buckets.over33, color: '#F43F5E' }
+        ];
+        var html = [];
+        for (var i = 0; i < list.length; i++) {
+          var pct = tot > 0 ? (list[i].count / tot) * 100 : 0;
+          html.push(
+            '<div>' +
+              '<div class="mono" style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:0.2rem;">' +
+                '<span>' + list[i].label + '</span><span>' + pct.toFixed(1) + '%</span>' +
+              '</div>' +
+              '<div class="progress-track"><div class="progress-fill" style="width:' + Math.min(100, pct) + '%;background:' + list[i].color + ';"></div></div>' +
+            '</div>'
+          );
+        }
+        document.getElementById('bucketsContainer').innerHTML = html.join('');
+      }
+
+      function renderRunLog() {
+        var tbody = document.getElementById('runLogBody');
+        if (runRecords.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="9" class="text-muted" style="text-align:center;padding:1.5rem;">No completed benchmark runs recorded yet.</td></tr>';
+          return;
+        }
+        var html = [];
+        for (var i = 0; i < runRecords.length; i++) {
+          var r = runRecords[i];
+          html.push(
+            '<tr>' +
+              '<td><strong>' + r.profile + '</strong><div class="text-muted" style="font-size:0.68rem;">' + r.time + ' · ' + r.duration.toFixed(1) + 's</div></td>' +
+              '<td>' + (r.mode === 'benchmark_60s' ? '60s OC Stress' : 'Free Run') + ' (' + r.steps + ' steps)</td>' +
+              '<td class="text-right">' + (r.cap ? r.cap + ' FPS' : 'Uncapped') + '</td>' +
+              '<td class="text-right text-cyan"><strong>' + r.avgFps.toFixed(1) + '</strong></td>' +
+              '<td class="text-right">' + r.low1.toFixed(1) + '</td>' +
+              '<td class="text-right">' + r.low01.toFixed(1) + '</td>' +
+              '<td class="text-right text-amber">' + r.ms.toFixed(2) + ' ms</td>' +
+              '<td class="text-right">±' + r.jitter.toFixed(2) + ' ms</td>' +
+              '<td class="text-right">' + r.stutters + '</td>' +
+            '</tr>'
+          );
+        }
+        tbody.innerHTML = html.join('');
+      }
+
+      function updateUiControls() {
+        var isRun = status === 'running';
+        document.getElementById('btnStart').disabled = isRun;
+        document.getElementById('btnStop').disabled = !isRun;
+        var topBtn = document.getElementById('topToggleBtn');
+        topBtn.textContent = isRun ? '■ Stop Benchmark' : '▶ Start Benchmark';
+        topBtn.className = isRun ? 'btn-stop' : 'btn-start';
+
+        var stLabel = document.getElementById('stateLabel');
+        if (isRun) {
+          stLabel.textContent = '● RUNNING (' + (config.mode === 'benchmark_60s' ? '60s OVERCLOCK TEST' : 'CONTINUOUS FREE RUN') + ')';
+          stLabel.className = 'text-emerald';
+        } else if (status === 'completed') {
+          stLabel.textContent = '■ COMPLETED (GPU IDLE)';
+          stLabel.className = 'text-cyan';
+        } else {
+          stLabel.textContent = '■ STOPPED (STANDBY · 0% GPU LOAD)';
+          stLabel.className = 'text-amber';
+        }
+
+        document.getElementById('standbyOverlay').className = isRun ? 'standby-overlay hidden' : 'standby-overlay';
+        document.getElementById('bar60sWrap').className = config.mode === 'benchmark_60s' ? 'panel' : 'panel hidden';
+      }
+
+      function stopBenchmark(completed60s) {
+        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        var elapsed = startTimeMs > 0 ? (performance.now() - startTimeMs) / 1000 : 0;
+        var st = computeStats();
+        if (allDeltas.length >= 15 && elapsed >= 1.0) {
+          runRecords.unshift({
+            time: new Date().toLocaleTimeString(),
+            profile: document.getElementById('profileInput').value || 'Stock GPU Profile',
+            mode: config.mode,
+            duration: completed60s ? 60.0 : elapsed,
+            steps: config.shaderIterations,
+            cap: config.referenceTargetFps,
+            avgFps: st.avgFps,
+            low1: st.low1,
+            low01: st.low01,
+            ms: st.avgFps > 0 ? 1000 / st.avgFps : 0,
+            jitter: st.jitter,
+            stutters: stutterCount
+          });
+          renderRunLog();
+        }
+        status = completed60s ? 'completed' : 'stopped';
+        drawFrame(2.4, Math.min(8, config.shaderIterations));
+        updateUiControls();
+      }
+
+      function startBenchmark(overrideMode) {
+        if (rafId) cancelAnimationFrame(rafId);
+        if (overrideMode) {
+          config.mode = overrideMode;
+          document.getElementById('modeFreeBtn').className = config.mode === 'free_run' ? 'btn-choice active' : 'btn-choice';
+          document.getElementById('mode60sBtn').className = config.mode === 'benchmark_60s' ? 'btn-choice active-amber' : 'btn-choice';
+        }
+        var now = performance.now();
+        startTimeMs = now; lastFrameMs = now; lastUiSyncMs = now;
+        allDeltas = []; recentDeltas = [];
+        buckets = { under4: 0, ms4to8: 0, ms8to16: 0, ms16to33: 0, over33: 0 };
+        stutterCount = 0; effectiveSteps = config.shaderIterations;
+        consecutiveSlow = 0; watchdogTriggers = 0; watchdogActive = false;
+        history = [];
+        status = 'running';
+        updateUiControls();
+
+        function tick(ts) {
+          if (status !== 'running') return;
+          var dt = ts - lastFrameMs;
+          lastFrameMs = ts;
+          var elapsed = (ts - startTimeMs) / 1000;
+
+          if (dt > 0.2 && dt < 1000) {
+            allDeltas.push(dt);
+            recentDeltas.push(dt);
+            if (recentDeltas.length > 35) recentDeltas.shift();
+
+            if (dt < 4.0) buckets.under4++;
+            else if (dt < 8.0) buckets.ms4to8++;
+            else if (dt <= 16.75) buckets.ms8to16++;
+            else if (dt <= 33.4) buckets.ms16to33++;
+            else buckets.over33++;
+
+            if (allDeltas.length > 20) {
+              var rAvg = recentDeltas.reduce(function(a,b){return a+b;},0) / recentDeltas.length;
+              if (dt > Math.max(22, rAvg * 2.1)) stutterCount++;
+            }
+
+            if (config.watchdogEnabled) {
+              if (dt > 58.0) {
+                consecutiveSlow++;
+                if (consecutiveSlow >= 3 && effectiveSteps > 8) {
+                  effectiveSteps = Math.max(8, effectiveSteps - 6);
+                  watchdogTriggers++; watchdogActive = true; consecutiveSlow = 0;
+                }
+              } else if (dt < 28.0) {
+                consecutiveSlow = 0;
+              }
+            } else {
+              effectiveSteps = config.shaderIterations;
+            }
+          }
+
+          drawFrame(elapsed, effectiveSteps);
+
+          if (config.mode === 'benchmark_60s' && elapsed >= 60.0) {
+            stopBenchmark(true);
+            return;
+          }
+
+          if (ts - lastUiSyncMs >= 100) {
+            lastUiSyncMs = ts;
+            var st = computeStats();
+            history.push({ time: elapsed, fps: st.curFps, ms: st.ms });
+            if (history.length > 150) history.shift();
+
+            document.getElementById('elapsedHeaderLabel').textContent = 'T+' + elapsed.toFixed(1) + 's';
+            var kpiFps = document.getElementById('kpiCurrentFps');
+            kpiFps.textContent = st.curFps.toFixed(1);
+            kpiFps.className = 'mono kpi-val-lg text-cyan';
+            document.getElementById('kpiFrameTime').innerHTML = 'DELTA: <strong class="text-amber">' + st.ms.toFixed(2) + ' ms</strong>';
+            document.getElementById('kpiAvgFps').textContent = st.avgFps.toFixed(1);
+            document.getElementById('kpiMinMax').textContent = 'MIN ' + st.minFps.toFixed(0) + ' · MAX ' + st.maxFps.toFixed(0);
+            document.getElementById('kpiLow1').textContent = st.low1.toFixed(1);
+            document.getElementById('kpiLow01').textContent = '/ ' + st.low01.toFixed(1);
+            document.getElementById('kpiJitter').textContent = 'JITTER: ±' + st.jitter.toFixed(2) + ' ms';
+
+            document.getElementById('hudFps').textContent = st.curFps.toFixed(1);
+            document.getElementById('hudMs').textContent = st.ms.toFixed(2) + ' ms';
+            document.getElementById('hudSub').textContent = 'SHADER: ' + effectiveSteps + ' steps · FRAMES: ' + allDeltas.length.toLocaleString();
+
+            if (config.referenceTargetFps) {
+              var dev = st.curFps - config.referenceTargetFps;
+              document.getElementById('kpiDeviation').textContent = (dev >= 0 ? '+' : '') + dev.toFixed(1);
+              var tol = Math.max(2.0, config.referenceTargetFps * 0.035);
+              var lockEl = document.getElementById('kpiLockStatus');
+              if (Math.abs(dev) <= tol) { lockEl.textContent = '● Locked to Cap'; lockEl.className = 'mono text-emerald'; }
+              else if (dev > tol) { lockEl.textContent = '▲ Above Target Cap'; lockEl.className = 'mono text-amber'; }
+              else { lockEl.textContent = '▼ GPU Bound'; lockEl.className = 'mono text-cyan'; }
+            } else {
+              document.getElementById('kpiDeviation').textContent = '—';
+              document.getElementById('kpiLockStatus').textContent = 'No Cap Selected';
+            }
+
+            if (config.mode === 'benchmark_60s') {
+              var rem = Math.max(0, 60 - elapsed);
+              document.getElementById('bar60sText').textContent = elapsed.toFixed(1) + 's / 60.0s (' + rem.toFixed(1) + 's remaining)';
+              document.getElementById('bar60sFill').style.width = Math.min(100, (elapsed / 60) * 100) + '%';
+            }
+
+            renderOscilloscope();
+            renderBuckets();
+          }
+
+          rafId = requestAnimationFrame(tick);
+        }
+        rafId = requestAnimationFrame(tick);
+      }
+
+      // Wire event listeners
+      document.getElementById('btnStart').addEventListener('click', function() { startBenchmark(); });
+      document.getElementById('btnStop').addEventListener('click', function() { stopBenchmark(false); });
+      document.getElementById('topToggleBtn').addEventListener('click', function() {
+        if (status === 'running') stopBenchmark(false); else startBenchmark();
+      });
+      document.getElementById('btnRun60s').addEventListener('click', function() { startBenchmark('benchmark_60s'); });
+      document.getElementById('overlayStartFreeBtn').addEventListener('click', function() { startBenchmark('free_run'); });
+      document.getElementById('overlayStart60sBtn').addEventListener('click', function() { startBenchmark('benchmark_60s'); });
+      document.getElementById('btnReset').addEventListener('click', function() {
+        if (status === 'running') stopBenchmark(false);
+        allDeltas = []; recentDeltas = []; history = [];
+        buckets = { under4: 0, ms4to8: 0, ms8to16: 0, ms16to33: 0, over33: 0 };
+        document.getElementById('kpiCurrentFps').textContent = '0.0';
+        document.getElementById('kpiCurrentFps').className = 'mono kpi-val-lg text-muted';
+        document.getElementById('kpiFrameTime').textContent = 'STANDBY (STOPPED)';
+        renderOscilloscope(); renderBuckets();
+      });
+
+      document.getElementById('modeFreeBtn').addEventListener('click', function() {
+        config.mode = 'free_run';
+        this.className = 'btn-choice active';
+        document.getElementById('mode60sBtn').className = 'btn-choice';
+        updateUiControls();
+      });
+      document.getElementById('mode60sBtn').addEventListener('click', function() {
+        config.mode = 'benchmark_60s';
+        this.className = 'btn-choice active-amber';
+        document.getElementById('modeFreeBtn').className = 'btn-choice';
+        updateUiControls();
+      });
+
+      var capBtns = document.querySelectorAll('#capButtonsContainer button');
+      function updateCapSummary() {
+        var c = config.referenceTargetFps;
+        document.getElementById('targetRefSummary').textContent = c ? c + ' FPS (' + (1000 / c).toFixed(2) + ' ms)' : 'No Reference';
+        document.getElementById('kpiTargetSub').textContent = c ? 'vs ' + c : '';
+        renderOscilloscope();
+      }
+      for (var i = 0; i < capBtns.length; i++) {
+        capBtns[i].addEventListener('click', function() {
+          for (var j = 0; j < capBtns.length; j++) capBtns[j].className = 'btn-choice mono';
+          this.className = 'btn-choice mono active';
+          var v = this.getAttribute('data-cap');
+          config.referenceTargetFps = v === 'off' ? null : parseInt(v, 10);
+          if (config.referenceTargetFps) document.getElementById('customCapInput').value = String(config.referenceTargetFps);
+          updateCapSummary();
+        });
+      }
+      document.getElementById('customCapInput').addEventListener('input', function() {
+        var val = parseInt(this.value, 10);
+        if (!isNaN(val) && val >= 10 && val <= 1000) {
+          config.referenceTargetFps = val;
+          updateCapSummary();
+        }
+      });
+
+      var presetMap = {
+        light: { steps: 10, scale: 0.75 },
+        balanced: { steps: 26, scale: 1.0 },
+        heavy: { steps: 44, scale: 1.0 }
+      };
+      var presetBtns = document.querySelectorAll('#presetButtonsContainer button');
+      function updateWorkloadLabels() {
+        document.getElementById('stepsValueLabel').textContent = config.shaderIterations + ' steps';
+        document.getElementById('stepsSlider').value = String(config.shaderIterations);
+        document.getElementById('scaleValueLabel').textContent = Math.round(config.resolutionScale * 100) + '%';
+        document.getElementById('workloadSummary').textContent = config.shaderIterations + ' Steps · ' + Math.round(config.resolutionScale * 100) + '%';
+        resizeCanvas();
+      }
+      for (var p = 0; p < presetBtns.length; p++) {
+        presetBtns[p].addEventListener('click', function() {
+          for (var q = 0; q < presetBtns.length; q++) presetBtns[q].className = 'btn-choice';
+          this.className = 'btn-choice active';
+          var pk = this.getAttribute('data-preset');
+          config.shaderIterations = presetMap[pk].steps;
+          config.resolutionScale = presetMap[pk].scale;
+          effectiveSteps = config.shaderIterations;
+          updateWorkloadLabels();
+        });
+      }
+      document.getElementById('stepsSlider').addEventListener('input', function() {
+        config.shaderIterations = parseInt(this.value, 10);
+        effectiveSteps = config.shaderIterations;
+        updateWorkloadLabels();
+      });
+      document.getElementById('sceneSelect').addEventListener('change', function() {
+        config.scene = parseInt(this.value, 10);
+        if (status !== 'running') drawFrame(2.4, Math.min(8, config.shaderIterations));
+      });
+      var scaleBtns = document.querySelectorAll('#scaleButtonsContainer button');
+      for (var sb = 0; sb < scaleBtns.length; sb++) {
+        scaleBtns[sb].addEventListener('click', function() {
+          for (var k = 0; k < scaleBtns.length; k++) scaleBtns[k].className = 'btn-choice mono';
+          this.className = 'btn-choice mono active';
+          config.resolutionScale = parseFloat(this.getAttribute('data-scale'));
+          updateWorkloadLabels();
+        });
+      }
+      document.getElementById('watchdogCheckbox').addEventListener('change', function() {
+        config.watchdogEnabled = this.checked;
+        var wl = document.getElementById('watchdogStatusLabel');
+        wl.textContent = this.checked ? 'ARMED (<58ms SAFE)' : 'DISABLED';
+        wl.className = this.checked ? 'text-emerald' : 'text-muted';
+      });
+      document.getElementById('btnClearLog').addEventListener('click', function() {
+        runRecords = []; renderRunLog();
+      });
+      document.getElementById('btnExportCsv').addEventListener('click', function() {
+        if (runRecords.length === 0) return;
+        var rows = ['Timestamp,Profile,Mode,Duration_s,Shader_Steps,Target_Cap,Avg_FPS,1Pct_Low,0.1Pct_Low,Avg_ms,Jitter_ms,Stutters'];
+        for (var i = 0; i < runRecords.length; i++) {
+          var r = runRecords[i];
+          rows.push([r.time, '"' + r.profile + '"', r.mode, r.duration.toFixed(1), r.steps, r.cap || 'Uncapped', r.avgFps.toFixed(2), r.low1.toFixed(2), r.low01.toFixed(2), r.ms.toFixed(2), r.jitter.toFixed(2), r.stutters].join(','));
+        }
+        var blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'framepulse-benchmark.csv';
+        a.click();
+      });
+
+      renderOscilloscope();
+      renderBuckets();
+    })();
+  </script>
+</body>
+</html>
