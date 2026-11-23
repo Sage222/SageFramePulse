@@ -6,8 +6,8 @@ import {
   Timer,
   ShieldCheck,
   Sliders,
-  Gauge,
   Download,
+  Zap,
 } from 'lucide-react';
 import {
   BenchmarkConfig,
@@ -35,29 +35,47 @@ const INITIAL_BUCKETS: FrameDistributionBuckets = {
 
 const PRESET_CONFIGS: Record<
   Exclude<WorkloadPreset, 'custom'>,
-  { shaderIterations: number; resolutionScale: number; geometrySubdivisions: number; description: string }
+  {
+    label: string;
+    shaderIterations: number;
+    resolutionScale: number;
+    geometrySubdivisions: number;
+    description: string;
+  }
 > = {
+  ultralight: {
+    label: 'Ultra-Light',
+    shaderIterations: 2,
+    resolutionScale: 0.5,
+    geometrySubdivisions: 80,
+    description:
+      'Minimal 2-step analytical shader pass designed to push 300–600+ FPS for testing external FPS limiters.',
+  },
   light: {
-    shaderIterations: 10,
-    resolutionScale: 0.75,
-    geometrySubdivisions: 150,
-    description: 'High-FPS headroom (240+ FPS) ideal for testing external 3rd-party frame rate limiters.',
+    label: 'Light',
+    shaderIterations: 6,
+    resolutionScale: 0.5,
+    geometrySubdivisions: 120,
+    description:
+      'Fast 6-step shader pass without 3D normal overhead for high-refresh 200–350+ FPS frame pacing tests.',
   },
   balanced: {
-    shaderIterations: 26,
-    resolutionScale: 1.0,
-    geometrySubdivisions: 320,
-    description: 'Sustained WebGL2 shader load that stresses GPU clocks while keeping desktop UI silky smooth.',
+    label: 'Balanced',
+    shaderIterations: 20,
+    resolutionScale: 0.75,
+    geometrySubdivisions: 280,
+    description:
+      'Sustained 3D ray-marched WebGL2 workload that stresses GPU clocks while keeping desktop UI smooth.',
   },
   heavy: {
-    shaderIterations: 44,
+    label: 'Heavy (OC)',
+    shaderIterations: 42,
     resolutionScale: 1.0,
-    geometrySubdivisions: 600,
-    description: 'Intensive 44-step ALU/FBM shader stress for 60s GPU overclock stability testing with watchdog protection.',
+    geometrySubdivisions: 520,
+    description:
+      'Intensive 42-step ALU/FBM shader stress for 60s GPU overclock stability testing with watchdog protection.',
   },
 };
-
-const COMMON_FPS_CAPS: (number | null)[] = [null, 30, 60, 90, 120, 144, 165, 240];
 
 export default function App() {
   // Always open in a STOPPED state as required
@@ -65,17 +83,15 @@ export default function App() {
 
   const [config, setConfig] = useState<BenchmarkConfig>({
     mode: 'free_run',
-    preset: 'balanced',
+    loopEngine: 'uncapped', // Zero inbuilt FPS limit — bypasses 120Hz requestAnimationFrame V-Sync lock
+    preset: 'ultralight',
     scene: 'volumetric_lattice',
-    shaderIterations: PRESET_CONFIGS.balanced.shaderIterations,
-    resolutionScale: PRESET_CONFIGS.balanced.resolutionScale,
-    geometrySubdivisions: PRESET_CONFIGS.balanced.geometrySubdivisions,
-    referenceTargetFps: 144,
+    shaderIterations: PRESET_CONFIGS.ultralight.shaderIterations,
+    resolutionScale: PRESET_CONFIGS.ultralight.resolutionScale,
+    geometrySubdivisions: PRESET_CONFIGS.ultralight.geometrySubdivisions,
     watchdogEnabled: true,
     clockProfileLabel: 'Stock GPU Profile',
   });
-
-  const [customCapInput, setCustomCapInput] = useState<string>('144');
 
   const [telemetry, setTelemetry] = useState<LiveTelemetry>({
     currentFps: 0,
@@ -87,47 +103,51 @@ export default function App() {
     low1PercentFps: 0,
     low01PercentFps: 0,
     frameJitterMs: 0,
-    limiterDeviationFps: null,
-    limiterPacingStatus: 'Unset',
     totalFrames: 0,
     stutterEvents: 0,
     elapsedSeconds: 0,
     remainingSeconds: 60,
-    effectiveShaderSteps: PRESET_CONFIGS.balanced.shaderIterations,
+    effectiveShaderSteps: PRESET_CONFIGS.ultralight.shaderIterations,
     watchdogTriggeredCount: 0,
     watchdogActiveNow: false,
     gpuRendererInfo: 'Initializing WebGL2 Adapter...',
     gpuVendorInfo: 'Hardware Probe',
     renderBackend: 'WebGL2',
-    renderWidth: 1280,
-    renderHeight: 720,
+    renderWidth: 640,
+    renderHeight: 360,
     buckets: { ...INITIAL_BUCKETS },
   });
 
   const [history, setHistory] = useState<FrameTimeHistoryPoint[]>([]);
   const [runRecords, setRunRecords] = useState<BenchmarkRunRecord[]>(() => {
     try {
-      const saved = localStorage.getItem('framepulse_run_records_v1');
+      const saved = localStorage.getItem('framepulse_run_records_v2');
       return saved ? (JSON.parse(saved) as BenchmarkRunRecord[]) : [];
     } catch {
       return [];
     }
   });
-  const [lastCompletedBanner, setLastCompletedBanner] = useState<BenchmarkRunRecord | null>(null);
+  const [lastCompletedBanner, setLastCompletedBanner] =
+    useState<BenchmarkRunRecord | null>(null);
 
   useEffect(() => {
     try {
-      localStorage.setItem('framepulse_run_records_v1', JSON.stringify(runRecords));
+      localStorage.setItem(
+        'framepulse_run_records_v2',
+        JSON.stringify(runRecords)
+      );
     } catch {
-      // Ignore storage quota errors in restricted environments
+      // Ignore storage quota errors
     }
   }, [runRecords]);
 
-  // Refs for precision animation loop without React state closure lag
+  // Refs for precision animation loop
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewportContainerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<GpuBenchmarkRenderer | null>(null);
   const rafIdRef = useRef<number | null>(null);
+  const timeoutIdRef = useRef<number | null>(null);
+  const msgChannelRef = useRef<MessageChannel | null>(null);
   const isRunningRef = useRef<boolean>(false);
   const configRef = useRef<BenchmarkConfig>(config);
   configRef.current = config;
@@ -136,6 +156,7 @@ export default function App() {
   const startTimeMsRef = useRef<number>(0);
   const lastFrameTimestampRef = useRef<number>(0);
   const lastUiSyncMsRef = useRef<number>(0);
+  const lastEventYieldMsRef = useRef<number>(0);
   const allFrameDeltasRef = useRef<number[]>([]);
   const recentDeltasWindowRef = useRef<number[]>([]);
   const bucketsRef = useRef<FrameDistributionBuckets>({ ...INITIAL_BUCKETS });
@@ -146,9 +167,27 @@ export default function App() {
   const watchdogActiveRef = useRef<boolean>(false);
   const historyRef = useRef<FrameTimeHistoryPoint[]>([]);
   const renderDimensionsRef = useRef<{ width: number; height: number }>({
-    width: 1280,
-    height: 720,
+    width: 640,
+    height: 360,
   });
+
+  const stopLoopHandles = useCallback(() => {
+    isRunningRef.current = false;
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    if (timeoutIdRef.current !== null) {
+      clearTimeout(timeoutIdRef.current);
+      timeoutIdRef.current = null;
+    }
+    if (msgChannelRef.current) {
+      msgChannelRef.current.port1.onmessage = null;
+      msgChannelRef.current.port1.close();
+      msgChannelRef.current.port2.close();
+      msgChannelRef.current = null;
+    }
+  }, []);
 
   // Initialize WebGL renderer once on mount and draw static standby frame (STOPPED state)
   useEffect(() => {
@@ -209,16 +248,14 @@ export default function App() {
     window.addEventListener('resize', handleResize);
     return () => {
       window.removeEventListener('resize', handleResize);
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-      }
+      stopLoopHandles();
       renderer.dispose();
     };
-  }, []);
+  }, [stopLoopHandles]);
 
-  // Re-render static standby preview whenever scene or resolution changes while stopped
+  // Update canvas size immediately when resolutionScale changes (even while running!)
   useEffect(() => {
-    if (status !== 'running' && rendererRef.current && viewportContainerRef.current) {
+    if (rendererRef.current && viewportContainerRef.current) {
       const r = viewportContainerRef.current.getBoundingClientRect();
       const dims = rendererRef.current.resize(
         r.width || 960,
@@ -226,7 +263,12 @@ export default function App() {
         config.resolutionScale
       );
       renderDimensionsRef.current = dims;
-      rendererRef.current.renderStandbyFrame(config.scene, config.shaderIterations);
+      if (status !== 'running') {
+        rendererRef.current.renderStandbyFrame(
+          config.scene,
+          config.shaderIterations
+        );
+      }
       setTelemetry((prev) => ({
         ...prev,
         renderWidth: dims.width,
@@ -237,95 +279,95 @@ export default function App() {
   }, [config.scene, config.resolutionScale, config.shaderIterations, status]);
 
   // Helper to compute 1% low, 0.1% low, jitter, and averages from collected frame deltas
-  const calculateMetrics = useCallback((deltas: number[], recentDeltas: number[]) => {
-    if (deltas.length === 0) {
+  const calculateMetrics = useCallback(
+    (deltas: number[], recentDeltas: number[]) => {
+      if (deltas.length === 0) {
+        return {
+          currentFps: 0,
+          instantFps: 0,
+          frameTimeMs: 0,
+          avgFps: 0,
+          minFps: 0,
+          maxFps: 0,
+          low1PercentFps: 0,
+          low01PercentFps: 0,
+          frameJitterMs: 0,
+        };
+      }
+
+      const lastDelta = deltas[deltas.length - 1];
+      const instantFps = lastDelta > 0 ? 1000 / lastDelta : 0;
+
+      const recentSum = recentDeltas.reduce((a, b) => a + b, 0);
+      const recentAvgMs =
+        recentDeltas.length > 0 ? recentSum / recentDeltas.length : lastDelta;
+      const currentFps = recentAvgMs > 0 ? 1000 / recentAvgMs : 0;
+
+      let varianceSum = 0;
+      for (let i = 0; i < recentDeltas.length; i++) {
+        const diff = recentDeltas[i] - recentAvgMs;
+        varianceSum += diff * diff;
+      }
+      const frameJitterMs =
+        recentDeltas.length > 1
+          ? Math.sqrt(varianceSum / recentDeltas.length)
+          : 0;
+
+      let totalMs = 0;
+      let minDelta = Infinity;
+      let maxDelta = 0;
+      for (let i = 0; i < deltas.length; i++) {
+        const d = deltas[i];
+        totalMs += d;
+        if (d < minDelta) minDelta = d;
+        if (d > maxDelta) maxDelta = d;
+      }
+
+      const avgMs = totalMs / deltas.length;
+      const avgFps = avgMs > 0 ? 1000 / avgMs : 0;
+      const maxFps = minDelta > 0 ? 1000 / minDelta : 0;
+      const minFps = maxDelta > 0 ? 1000 / maxDelta : 0;
+
+      // Sample up to latest 4000 frames for fast percentile sorting at 300+ FPS
+      const samplePool =
+        deltas.length > 4000 ? deltas.slice(-4000) : deltas;
+      const sortedDesc = [...samplePool].sort((a, b) => b - a);
+      const count1Pct = Math.max(1, Math.ceil(sortedDesc.length * 0.01));
+      const count01Pct = Math.max(1, Math.ceil(sortedDesc.length * 0.001));
+
+      let sumSlow1 = 0;
+      for (let i = 0; i < count1Pct; i++) sumSlow1 += sortedDesc[i];
+      const low1PercentFps = 1000 / (sumSlow1 / count1Pct);
+
+      let sumSlow01 = 0;
+      for (let i = 0; i < count01Pct; i++) sumSlow01 += sortedDesc[i];
+      const low01PercentFps = 1000 / (sumSlow01 / count01Pct);
+
       return {
-        currentFps: 0,
-        instantFps: 0,
-        frameTimeMs: 0,
-        avgFps: 0,
-        minFps: 0,
-        maxFps: 0,
-        low1PercentFps: 0,
-        low01PercentFps: 0,
-        frameJitterMs: 0,
+        currentFps,
+        instantFps,
+        frameTimeMs: recentAvgMs,
+        avgFps,
+        minFps,
+        maxFps,
+        low1PercentFps,
+        low01PercentFps,
+        frameJitterMs,
       };
-    }
-
-    const lastDelta = deltas[deltas.length - 1];
-    const instantFps = lastDelta > 0 ? 1000 / lastDelta : 0;
-
-    // Rolling window (~30 recent frames) for smooth readable current FPS
-    const recentSum = recentDeltas.reduce((a, b) => a + b, 0);
-    const recentAvgMs = recentDeltas.length > 0 ? recentSum / recentDeltas.length : lastDelta;
-    const currentFps = recentAvgMs > 0 ? 1000 / recentAvgMs : 0;
-
-    // Jitter = standard deviation of recent frame deltas in ms
-    let varianceSum = 0;
-    for (let i = 0; i < recentDeltas.length; i++) {
-      const diff = recentDeltas[i] - recentAvgMs;
-      varianceSum += diff * diff;
-    }
-    const frameJitterMs =
-      recentDeltas.length > 1 ? Math.sqrt(varianceSum / recentDeltas.length) : 0;
-
-    // Session totals
-    let totalMs = 0;
-    let minDelta = Infinity;
-    let maxDelta = 0;
-    for (let i = 0; i < deltas.length; i++) {
-      const d = deltas[i];
-      totalMs += d;
-      if (d < minDelta) minDelta = d;
-      if (d > maxDelta) maxDelta = d;
-    }
-
-    const avgMs = totalMs / deltas.length;
-    const avgFps = avgMs > 0 ? 1000 / avgMs : 0;
-    const maxFps = minDelta > 0 ? 1000 / minDelta : 0;
-    const minFps = maxDelta > 0 ? 1000 / maxDelta : 0;
-
-    // 1% Low and 0.1% Low FPS (average of the slowest 1% and 0.1% frame deltas)
-    const sortedDesc = [...deltas].sort((a, b) => b - a);
-    const count1Pct = Math.max(1, Math.ceil(sortedDesc.length * 0.01));
-    const count01Pct = Math.max(1, Math.ceil(sortedDesc.length * 0.001));
-
-    let sumSlow1 = 0;
-    for (let i = 0; i < count1Pct; i++) sumSlow1 += sortedDesc[i];
-    const low1PercentFps = 1000 / (sumSlow1 / count1Pct);
-
-    let sumSlow01 = 0;
-    for (let i = 0; i < count01Pct; i++) sumSlow01 += sortedDesc[i];
-    const low01PercentFps = 1000 / (sumSlow01 / count01Pct);
-
-    return {
-      currentFps,
-      instantFps,
-      frameTimeMs: recentAvgMs,
-      avgFps,
-      minFps,
-      maxFps,
-      low1PercentFps,
-      low01PercentFps,
-      frameJitterMs,
-    };
-  }, []);
+    },
+    []
+  );
 
   // Finalize and record a benchmark run
   const finalizeRun = useCallback(
     (completedFull60s: boolean, elapsedSec: number) => {
-      isRunningRef.current = false;
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
+      stopLoopHandles();
 
       const deltas = allFrameDeltasRef.current;
       const recent = recentDeltasWindowRef.current;
       const metrics = calculateMetrics(deltas, recent);
       const activeConfig = configRef.current;
 
-      // Return canvas to low-power standby frame
       if (rendererRef.current) {
         rendererRef.current.renderStandbyFrame(
           activeConfig.scene,
@@ -336,10 +378,6 @@ export default function App() {
       if (deltas.length >= 15 && elapsedSec >= 1.0) {
         const avgFrameTimeMs =
           metrics.avgFps > 0 ? 1000 / metrics.avgFps : 0;
-        const consistencyRatio =
-          metrics.avgFps > 0
-            ? Math.min(100, (metrics.low1PercentFps / metrics.avgFps) * 100)
-            : 0;
 
         const newRecord: BenchmarkRunRecord = {
           id: `run-${Date.now()}`,
@@ -349,6 +387,7 @@ export default function App() {
             second: '2-digit',
           }),
           mode: activeConfig.mode,
+          loopEngine: activeConfig.loopEngine,
           durationSeconds: elapsedSec,
           completedFull60s,
           clockProfileLabel:
@@ -357,7 +396,6 @@ export default function App() {
           scene: activeConfig.scene,
           shaderIterations: activeConfig.shaderIterations,
           resolutionScale: activeConfig.resolutionScale,
-          referenceTargetFps: activeConfig.referenceTargetFps,
           avgFps: metrics.avgFps,
           minFps: metrics.minFps,
           maxFps: metrics.maxFps,
@@ -368,7 +406,6 @@ export default function App() {
           totalFrames: deltas.length,
           stutterEvents: stutterCountRef.current,
           watchdogTriggers: watchdogCountRef.current,
-          pacingConsistencyPercent: consistencyRatio,
         };
 
         setRunRecords((prev) => [newRecord, ...prev]);
@@ -377,7 +414,7 @@ export default function App() {
 
       setStatus(completedFull60s ? 'completed' : 'stopped');
     },
-    [calculateMetrics]
+    [calculateMetrics, stopLoopHandles]
   );
 
   // Stop benchmark handler
@@ -393,13 +430,10 @@ export default function App() {
     finalizeRun(false, elapsedSec);
   }, [finalizeRun]);
 
-  // Start benchmark handler (can be launched in current mode or explicitly override mode)
+  // Start benchmark handler
   const handleStartBenchmark = useCallback(
     (overrideMode?: BenchmarkMode) => {
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
+      stopLoopHandles();
 
       const targetMode = overrideMode ?? configRef.current.mode;
       if (overrideMode && overrideMode !== configRef.current.mode) {
@@ -407,11 +441,11 @@ export default function App() {
         configRef.current = { ...configRef.current, mode: overrideMode };
       }
 
-      // Reset accumulators
       const now = performance.now();
       startTimeMsRef.current = now;
       lastFrameTimestampRef.current = now;
       lastUiSyncMsRef.current = now;
+      lastEventYieldMsRef.current = now;
       allFrameDeltasRef.current = [];
       recentDeltasWindowRef.current = [];
       bucketsRef.current = { ...INITIAL_BUCKETS };
@@ -427,51 +461,76 @@ export default function App() {
       isRunningRef.current = true;
       setStatus('running');
 
-      const loop = (timestamp: number) => {
+      const channel = new MessageChannel();
+      msgChannelRef.current = channel;
+
+      const scheduleNextTick = (currentNow: number) => {
+        if (!isRunningRef.current) return;
+        if (configRef.current.loopEngine === 'vsync_raf') {
+          rafIdRef.current = requestAnimationFrame(() => executeFrameTick());
+        } else {
+          // Uncapped High-Frequency Loop:
+          // Yields briefly via setTimeout every 18ms so browser mouse clicks (Stop button, sliders)
+          // remain 100% instant while breaking past the 120Hz requestAnimationFrame V-Sync ceiling!
+          if (currentNow - lastEventYieldMsRef.current >= 18) {
+            lastEventYieldMsRef.current = currentNow;
+            timeoutIdRef.current = window.setTimeout(() => {
+              if (isRunningRef.current) executeFrameTick();
+            }, 0);
+          } else {
+            channel.port2.postMessage(null);
+          }
+        }
+      };
+
+      const executeFrameTick = () => {
         if (!isRunningRef.current) return;
 
+        const timestamp = performance.now();
         const dt = timestamp - lastFrameTimestampRef.current;
+
+        // Guard against 0.00ms sub-microsecond ticks
+        if (dt < 0.15) {
+          scheduleNextTick(timestamp);
+          return;
+        }
+
         lastFrameTimestampRef.current = timestamp;
         const elapsedSec = (timestamp - startTimeMsRef.current) / 1000;
         const activeCfg = configRef.current;
 
-        // Ignore the very first 0ms initialization tick or tab-switch spikes > 1000ms
-        if (dt > 0.2 && dt < 1000) {
+        if (dt < 1000) {
           allFrameDeltasRef.current.push(dt);
           recentDeltasWindowRef.current.push(dt);
-          if (recentDeltasWindowRef.current.length > 35) {
+          if (recentDeltasWindowRef.current.length > 60) {
             recentDeltasWindowRef.current.shift();
           }
 
-          // Classify frame time bucket
           if (dt < 4.0) bucketsRef.current.under4ms++;
           else if (dt < 8.0) bucketsRef.current.ms4to8++;
           else if (dt <= 16.75) bucketsRef.current.ms8to16_7++;
           else if (dt <= 33.4) bucketsRef.current.ms16_7to33_3++;
           else bucketsRef.current.over33_3ms++;
 
-          // Stutter detection: frame delta > 2.1x rolling window average (after warmup)
-          if (allFrameDeltasRef.current.length > 20) {
+          if (allFrameDeltasRef.current.length > 30) {
             const recentAvg =
               recentDeltasWindowRef.current.reduce((a, b) => a + b, 0) /
               recentDeltasWindowRef.current.length;
-            if (dt > Math.max(22, recentAvg * 2.1)) {
+            if (dt > Math.max(22, recentAvg * 2.2)) {
               stutterCountRef.current++;
             }
           }
 
-          // Desktop Responsiveness Watchdog:
-          // Ensures GPU stress never locks up the user's PC or mouse cursor
+          // Desktop Responsiveness Watchdog
           if (activeCfg.watchdogEnabled) {
             if (dt > 58.0) {
-              // Below ~17.2 FPS
               consecutiveSlowFramesRef.current++;
               if (
                 consecutiveSlowFramesRef.current >= 3 &&
-                effectiveStepsRef.current > 8
+                effectiveStepsRef.current > 2
               ) {
                 effectiveStepsRef.current = Math.max(
-                  8,
+                  2,
                   effectiveStepsRef.current - 6
                 );
                 watchdogCountRef.current++;
@@ -487,7 +546,7 @@ export default function App() {
           }
         }
 
-        // Render WebGL2 GPU stress pass
+        // Render WebGL2 GPU frame and flush immediately
         if (rendererRef.current) {
           rendererRef.current.renderFrame(
             elapsedSec,
@@ -503,30 +562,13 @@ export default function App() {
           return;
         }
 
-        // Throttle React UI state sync to ~10 Hz (every 100ms) so React DOM updates
-        // never interfere with browser frame pacing or 3rd-party FPS limiters
+        // Sync UI telemetry at ~10 Hz (every 100ms)
         if (timestamp - lastUiSyncMsRef.current >= 100) {
           lastUiSyncMsRef.current = timestamp;
           const m = calculateMetrics(
             allFrameDeltasRef.current,
             recentDeltasWindowRef.current
           );
-
-          const refCap = activeCfg.referenceTargetFps;
-          let limiterDeviationFps: number | null = null;
-          let limiterPacingStatus: LiveTelemetry['limiterPacingStatus'] = 'Unset';
-
-          if (refCap && refCap > 0) {
-            limiterDeviationFps = m.currentFps - refCap;
-            const tolerance = Math.max(2.0, refCap * 0.035);
-            if (Math.abs(limiterDeviationFps) <= tolerance) {
-              limiterPacingStatus = 'Locked';
-            } else if (limiterDeviationFps > tolerance) {
-              limiterPacingStatus = 'Uncapped / Above Target';
-            } else {
-              limiterPacingStatus = 'GPU Bound / Below Target';
-            }
-          }
 
           const newPoint: FrameTimeHistoryPoint = {
             timeSec: elapsedSec,
@@ -542,8 +584,6 @@ export default function App() {
           setTelemetry((prev) => ({
             ...prev,
             ...m,
-            limiterDeviationFps,
-            limiterPacingStatus,
             totalFrames: allFrameDeltasRef.current.length,
             stutterEvents: stutterCountRef.current,
             elapsedSeconds: elapsedSec,
@@ -558,12 +598,16 @@ export default function App() {
           }));
         }
 
-        rafIdRef.current = requestAnimationFrame(loop);
+        scheduleNextTick(timestamp);
       };
 
-      rafIdRef.current = requestAnimationFrame(loop);
+      channel.port1.onmessage = () => {
+        executeFrameTick();
+      };
+
+      scheduleNextTick(now);
     },
-    [calculateMetrics, finalizeRun]
+    [calculateMetrics, finalizeRun, stopLoopHandles]
   );
 
   // Reset current telemetry counters without starting
@@ -589,8 +633,6 @@ export default function App() {
       low1PercentFps: 0,
       low01PercentFps: 0,
       frameJitterMs: 0,
-      limiterDeviationFps: null,
-      limiterPacingStatus: 'Unset',
       totalFrames: 0,
       stutterEvents: 0,
       elapsedSeconds: 0,
@@ -627,12 +669,12 @@ export default function App() {
       'Timestamp',
       'Clock_Profile',
       'Mode',
+      'Loop_Engine',
       'Duration_Sec',
       'Completed_60s',
       'Workload_Preset',
       'Shader_Iterations',
       'Resolution_Scale',
-      'Target_FPS_Cap',
       'Avg_FPS',
       '1Pct_Low_FPS',
       '0.1Pct_Low_FPS',
@@ -648,12 +690,12 @@ export default function App() {
       `"${r.timestamp}"`,
       `"${r.clockProfileLabel.replace(/"/g, '""')}"`,
       r.mode,
+      r.loopEngine,
       r.durationSeconds.toFixed(2),
       r.completedFull60s,
       r.preset,
       r.shaderIterations,
       r.resolutionScale,
-      r.referenceTargetFps ?? 'Uncapped',
       r.avgFps.toFixed(2),
       r.low1PercentFps.toFixed(2),
       r.low01PercentFps.toFixed(2),
@@ -770,7 +812,11 @@ export default function App() {
           <span>STATE:</span>
           {status === 'running' ? (
             <span className="text-emerald-400 font-semibold">
-              ● RUNNING ({config.mode === 'benchmark_60s' ? '60s OVERCLOCK TEST' : 'CONTINUOUS FREE RUN'})
+              ● RUNNING (
+              {config.mode === 'benchmark_60s'
+                ? '60s OVERCLOCK TEST'
+                : 'CONTINUOUS FREE RUN'}
+              )
             </span>
           ) : status === 'completed' ? (
             <span className="text-cyan-400 font-semibold">
@@ -782,14 +828,22 @@ export default function App() {
             </span>
           )}
           <span aria-hidden="true">·</span>
-          <span className="text-slate-300 truncate max-w-md" title={telemetry.gpuRendererInfo}>
+          <span
+            className="text-slate-300 truncate max-w-md"
+            title={telemetry.gpuRendererInfo}
+          >
             GPU: {telemetry.gpuRendererInfo}
           </span>
         </div>
 
         <div className="flex items-center gap-3 text-slate-400 tabular-nums">
           <span>
-            BACKEND: <strong className="text-slate-200">{telemetry.renderBackend}</strong>
+            LOOP:{' '}
+            <strong className="text-cyan-300">
+              {config.loopEngine === 'uncapped'
+                ? 'UNCAPPED (NO V-SYNC)'
+                : 'DISPLAY V-SYNC (rAF)'}
+            </strong>
           </span>
           <span aria-hidden="true">·</span>
           <span>
@@ -813,7 +867,7 @@ export default function App() {
               {telemetry.watchdogActiveNow
                 ? `THROTTLED (${telemetry.effectiveShaderSteps} STEPS)`
                 : config.watchdogEnabled
-                ? 'ARMED (<60ms SAFE)'
+                ? 'ARMED (<58ms SAFE)'
                 : 'DISABLED'}
             </strong>
           </span>
@@ -828,8 +882,8 @@ export default function App() {
           className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch"
         >
           {/* Left Control & Parameter Column (4 cols on lg) */}
-          <div className="lg:col-span-4 bg-[#0B0E17] border border-slate-800 rounded-lg p-5 flex flex-col justify-between space-y-5">
-            <div className="space-y-5">
+          <div className="lg:col-span-4 bg-[#0B0E17] border border-slate-800 rounded-lg p-5 flex flex-col justify-between space-y-4">
+            <div className="space-y-4">
               {/* Primary Execution Controls (Start / Stop / 60s Trigger) */}
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -889,8 +943,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Mode Selector */}
-              <div className="pt-4 border-t border-slate-800/80">
+              {/* Operating Mode Selector */}
+              <div className="pt-3.5 border-t border-slate-800/80">
                 <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-2">
                   Benchmark Operating Mode
                 </label>
@@ -924,101 +978,82 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 3rd-Party FPS Limiter Target Reference */}
-              <div className="pt-4 border-t border-slate-800/80">
+              {/* Frame Loop Timing Engine (Uncapped vs V-Sync) */}
+              <div className="pt-3.5 border-t border-slate-800/80">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Gauge className="w-3.5 h-3.5 text-cyan-400" />
-                    3rd-Party FPS Limiter Reference
+                    <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                    Frame Loop Timing (Zero FPS Limit)
                   </label>
-                  <span className="text-xs font-mono text-cyan-400 tabular-nums">
-                    {config.referenceTargetFps
-                      ? `${config.referenceTargetFps} FPS (${(
-                          1000 / config.referenceTargetFps
-                        ).toFixed(2)} ms)`
-                      : 'No Reference'}
-                  </span>
                 </div>
-                <p className="text-xs text-slate-400 mb-2.5">
-                  Select the FPS cap configured in your external tool (RTSS, NVIDIA/AMD Driver, Special K) to verify lock accuracy:
+                <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#111827] border border-slate-800 rounded-md">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfig((prev) => ({ ...prev, loopEngine: 'uncapped' }))
+                    }
+                    className={`py-1.5 px-2 text-xs font-medium rounded transition-colors whitespace-nowrap shrink-0 ${
+                      config.loopEngine === 'uncapped'
+                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Uncapped (No V-Sync)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        loopEngine: 'vsync_raf',
+                      }))
+                    }
+                    className={`py-1.5 px-2 text-xs font-medium rounded transition-colors whitespace-nowrap shrink-0 ${
+                      config.loopEngine === 'vsync_raf'
+                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Browser V-Sync (rAF)
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                  {config.loopEngine === 'uncapped'
+                    ? 'Bypasses browser 120Hz monitor refresh lock via MessageChannel + gl.flush() so GPU can push 300+ FPS.'
+                    : 'Standard requestAnimationFrame loop (browsers automatically sync this to your 120Hz display unless launched with --disable-frame-rate-limit).'}
                 </p>
-
-                <div className="grid grid-cols-4 gap-1.5 mb-2">
-                  {COMMON_FPS_CAPS.map((cap) => {
-                    const isSelected = config.referenceTargetFps === cap;
-                    return (
-                      <button
-                        key={cap ?? 'none'}
-                        type="button"
-                        onClick={() => {
-                          setConfig((prev) => ({
-                            ...prev,
-                            referenceTargetFps: cap,
-                          }));
-                          if (cap) setCustomCapInput(String(cap));
-                        }}
-                        className={`py-1.5 px-2 text-xs font-mono rounded border transition-colors whitespace-nowrap shrink-0 ${
-                          isSelected
-                            ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 font-semibold'
-                            : 'bg-[#111827] text-slate-300 border-slate-800 hover:border-slate-700'
-                        }`}
-                      >
-                        {cap === null ? 'Off' : `${cap}`}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400 whitespace-nowrap">
-                    Custom Target FPS:
-                  </span>
-                  <input
-                    type="number"
-                    min={15}
-                    max={1000}
-                    value={customCapInput}
-                    onChange={(e) => {
-                      setCustomCapInput(e.target.value);
-                      const parsed = parseInt(e.target.value, 10);
-                      if (!isNaN(parsed) && parsed >= 10 && parsed <= 1000) {
-                        setConfig((prev) => ({
-                          ...prev,
-                          referenceTargetFps: parsed,
-                        }));
-                      }
-                    }}
-                    className="w-24 px-2.5 py-1 text-xs font-mono bg-[#111827] border border-slate-700 rounded text-slate-100 focus:outline-none focus:border-cyan-400 tabular-nums"
-                  />
-                </div>
               </div>
 
               {/* GPU Workload Intensity & Responsiveness Guard */}
-              <div className="pt-4 border-t border-slate-800/80 space-y-3">
+              <div className="pt-3.5 border-t border-slate-800/80 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                     <Sliders className="w-3.5 h-3.5 text-cyan-400" />
                     GPU Stress Intensity
                   </label>
                   <span className="text-xs font-mono text-slate-300">
-                    {config.shaderIterations} Shader Steps · {Math.round(config.resolutionScale * 100)}%
+                    {config.shaderIterations}{' '}
+                    {config.shaderIterations === 1 ? 'Step' : 'Steps'} ·{' '}
+                    {Math.round(config.resolutionScale * 100)}%
                   </span>
                 </div>
 
-                {/* Preset buttons */}
-                <div className="grid grid-cols-3 gap-1.5">
-                  {(['light', 'balanced', 'heavy'] as const).map((presetKey) => (
+                {/* 4 Preset buttons including Ultra-Light (300+ FPS) */}
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(
+                    ['ultralight', 'light', 'balanced', 'heavy'] as const
+                  ).map((presetKey) => (
                     <button
                       key={presetKey}
                       type="button"
                       onClick={() => handleSelectPreset(presetKey)}
-                      className={`py-1.5 px-2.5 text-xs font-medium capitalize rounded border transition-colors whitespace-nowrap shrink-0 ${
+                      className={`py-1.5 px-1.5 text-xs font-medium rounded border transition-colors whitespace-nowrap shrink-0 ${
                         config.preset === presetKey
                           ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
                           : 'bg-[#111827] text-slate-300 border-slate-800 hover:border-slate-700'
                       }`}
                     >
-                      {presetKey}
+                      {PRESET_CONFIGS[presetKey].label}
                     </button>
                   ))}
                 </div>
@@ -1045,32 +1080,33 @@ export default function App() {
                     className="w-full px-2.5 py-1.5 text-xs bg-[#111827] border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-cyan-400"
                   >
                     <option value="volumetric_lattice">
-                      Volumetric Gyroid Lattice (Ray-Marched 3D + Specular)
+                      Volumetric Gyroid Lattice (Fast 1–10 Step / 3D Raymarch)
                     </option>
                     <option value="plasma_manifold">
-                      Trigonometric Plasma Manifold (Heavy ALU Sin/Cos/Exp)
+                      Trigonometric Plasma Manifold (ALU Sin/Cos/Exp)
                     </option>
                     <option value="geometric_matrix">
-                      Infinite Prism Matrix (Distance Field + Normal Probes)
+                      Infinite Prism Matrix (Distance Field Probes)
                     </option>
                   </select>
                 </div>
 
-                {/* Fine-grained Shader Iteration Slider (capped at 56 to guarantee responsiveness) */}
+                {/* Fine-grained Shader Iteration Slider (1 to 56 steps) */}
                 <div>
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="text-slate-400">
-                      Shader Ray/FBM Iterations (Safe Cap: 56)
+                      Shader Iterations (1 = 300+ FPS, 56 = Max OC)
                     </span>
                     <span className="font-mono text-cyan-400 tabular-nums">
-                      {config.shaderIterations} steps
+                      {config.shaderIterations}{' '}
+                      {config.shaderIterations === 1 ? 'step' : 'steps'}
                     </span>
                   </div>
                   <input
                     type="range"
-                    min={8}
+                    min={1}
                     max={56}
-                    step={2}
+                    step={1}
                     value={config.shaderIterations}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
@@ -1085,16 +1121,19 @@ export default function App() {
                   />
                 </div>
 
-                {/* Resolution Scale Selector */}
+                {/* Resolution Scale Selector (25% to 100%) */}
                 <div>
                   <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-slate-400">Internal Resolution Scale</span>
+                    <span className="text-slate-400">
+                      Internal Resolution Scale
+                    </span>
                     <span className="font-mono text-slate-300 tabular-nums">
-                      {Math.round(config.resolutionScale * 100)}% ({telemetry.renderWidth}×{telemetry.renderHeight})
+                      {Math.round(config.resolutionScale * 100)}% (
+                      {telemetry.renderWidth}×{telemetry.renderHeight})
                     </span>
                   </div>
                   <div className="grid grid-cols-4 gap-1.5">
-                    {[0.5, 0.75, 1.0, 1.25].map((scale) => (
+                    {[0.25, 0.5, 0.75, 1.0].map((scale) => (
                       <button
                         key={scale}
                         type="button"
@@ -1119,10 +1158,10 @@ export default function App() {
               </div>
 
               {/* Overclock Profile Tag & Responsiveness Watchdog Toggle */}
-              <div className="pt-4 border-t border-slate-800/80 space-y-3">
+              <div className="pt-3.5 border-t border-slate-800/80 space-y-3">
                 <div>
                   <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                    Overclock / Limiter Profile Label
+                    Overclock / Run Profile Label
                   </label>
                   <input
                     type="text"
@@ -1141,7 +1180,7 @@ export default function App() {
                       'Stock GPU Profile',
                       '+125 MHz Core / +400 MHz Mem',
                       'Undervolt 925mV',
-                      'RTSS 144 FPS Cap',
+                      '3rd-Party Limiter Test',
                     ].map((tag) => (
                       <button
                         key={tag}
@@ -1185,7 +1224,7 @@ export default function App() {
                 </label>
 
                 {/* Windows 10 / 11 Portable Double-Clickable Standalone HTML Export */}
-                <div className="pt-2">
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={handleDownloadStandaloneHtml}
@@ -1194,9 +1233,6 @@ export default function App() {
                     <Download className="w-3.5 h-3.5" />
                     Download Standalone .HTML (Double-Clickable)
                   </button>
-                  <p className="text-[11px] text-slate-500 mt-1 text-center">
-                    Zero-dependency single file · Opens directly on Windows 10/11 without Node.js
-                  </p>
                 </div>
               </div>
             </div>
@@ -1228,9 +1264,9 @@ export default function App() {
                 <div className="mt-1.5 text-xs font-mono text-slate-400 tabular-nums">
                   {status === 'running' ? (
                     <span>
-                      DELTA:{' '}
-                      <strong className="text-amber-400">
-                        {telemetry.frameTimeMs.toFixed(2)} ms
+                      INSTANT:{' '}
+                      <strong className="text-slate-200">
+                        {telemetry.instantFps.toFixed(0)} FPS
                       </strong>
                     </span>
                   ) : (
@@ -1239,40 +1275,25 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 3rd-Party Limiter Lock & Deviation */}
+              {/* Frame Time Delta (ms) */}
               <div className="bg-[#0B0E17] border border-slate-800 rounded-lg p-4 flex flex-col justify-between">
                 <div className="text-xs font-mono uppercase tracking-wider text-slate-400">
-                  LIMITER ACCURACY
+                  FRAME TIME DELTA
                 </div>
                 <div className="mt-1 flex items-baseline">
-                  <span className="text-2xl font-mono font-bold text-slate-100 tabular-nums">
-                    {status === 'running' &&
-                    telemetry.limiterDeviationFps !== null
-                      ? `${
-                          telemetry.limiterDeviationFps >= 0 ? '+' : ''
-                        }${telemetry.limiterDeviationFps.toFixed(1)}`
-                      : '—'}
+                  <span className="text-2xl font-mono font-bold text-amber-400 tabular-nums">
+                    {status === 'running'
+                      ? telemetry.frameTimeMs.toFixed(2)
+                      : '0.00'}
                   </span>
-                  {config.referenceTargetFps && (
-                    <span className="text-xs font-mono text-slate-400 ml-1.5">
-                      vs {config.referenceTargetFps}
-                    </span>
-                  )}
+                  <span className="text-xs font-mono text-slate-400 ml-1.5">
+                    ms
+                  </span>
                 </div>
-                <div className="mt-1.5 text-xs font-mono truncate">
-                  {status !== 'running' ? (
-                    <span className="text-slate-500">Awaiting Start</span>
-                  ) : telemetry.limiterPacingStatus === 'Locked' ? (
-                    <span className="text-emerald-400">● Locked to Cap</span>
-                  ) : telemetry.limiterPacingStatus ===
-                    'Uncapped / Above Target' ? (
-                    <span className="text-amber-400">▲ Above Target Cap</span>
-                  ) : telemetry.limiterPacingStatus ===
-                    'GPU Bound / Below Target' ? (
-                    <span className="text-cyan-300">▼ GPU Bound</span>
-                  ) : (
-                    <span className="text-slate-500">No Cap Selected</span>
-                  )}
+                <div className="mt-1.5 text-xs font-mono text-slate-400 tabular-nums">
+                  {config.loopEngine === 'uncapped'
+                    ? 'Uncapped Engine'
+                    : 'Display V-Synced'}
                 </div>
               </div>
 
@@ -1318,7 +1339,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 60-Second Benchmark Progress Bar (always visible when 60s mode is active or running) */}
+            {/* 60-Second Benchmark Progress Bar */}
             {config.mode === 'benchmark_60s' && (
               <div className="bg-[#0B0E17] border border-slate-800 rounded-lg px-4 py-3">
                 <div className="flex items-center justify-between text-xs font-mono mb-1.5">
@@ -1328,7 +1349,9 @@ export default function App() {
                   </span>
                   <span className="text-slate-300 tabular-nums">
                     {status === 'running'
-                      ? `${telemetry.elapsedSeconds.toFixed(1)}s / 60.0s (${telemetry.remainingSeconds.toFixed(
+                      ? `${telemetry.elapsedSeconds.toFixed(
+                          1
+                        )}s / 60.0s (${telemetry.remainingSeconds.toFixed(
                           1
                         )}s remaining)`
                       : status === 'completed'
@@ -1424,10 +1447,16 @@ export default function App() {
                       ■ BENCHMARK STOPPED — GPU IDLE (0% LOAD)
                     </div>
                     <h2 className="text-xl font-bold text-slate-100 text-balance">
-                      Ready for Frame Limiter & Overclock Testing
+                      Uncapped 300+ FPS & Overclock Benchmark
                     </h2>
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      The WebGL2 shader loop is paused so your system uses zero GPU resources until started. Choose a continuous run to test your 3rd-party FPS limiter or a timed 60-second pass to validate GPU overclock stability.
+                      Opens in a stopped state with zero internal FPS limit. In{' '}
+                      <strong className="text-slate-200">Ultra-Light</strong>{' '}
+                      mode with the{' '}
+                      <strong className="text-slate-200">
+                        Uncapped (No V-Sync)
+                      </strong>{' '}
+                      loop, your GPU renders past the 120Hz monitor refresh ceiling (300+ FPS) so you can verify your 3rd-party FPS limiter or run a 60-second overclock stability test.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                       <button
@@ -1458,7 +1487,6 @@ export default function App() {
         <section id="oscilloscope">
           <TelemetryCharts
             history={history}
-            referenceTargetFps={config.referenceTargetFps}
             buckets={telemetry.buckets}
             totalFrames={telemetry.totalFrames}
             currentFps={status === 'running' ? telemetry.currentFps : 0}
@@ -1466,7 +1494,7 @@ export default function App() {
           />
         </section>
 
-        {/* Overclock & Frame Limiter Run Comparison Log */}
+        {/* Overclock & Benchmark Run Comparison Log */}
         <section id="run-log">
           <BenchmarkRunHistory
             runs={runRecords}
@@ -1478,29 +1506,47 @@ export default function App() {
           />
         </section>
 
-        {/* Practical Calibration Guide for 3rd-Party FPS Limiters & Overclocking */}
+        {/* Practical Calibration Guide */}
         <section
           id="calibration-guide"
           className="bg-[#0B0E17] border border-slate-800 rounded-lg p-5"
         >
           <h3 className="text-sm font-semibold text-slate-100 mb-3">
-            Methodology: Testing 3rd-Party FPS Limiters & 60s GPU Overclock Settings
+            Notes on Browser V-Sync (120Hz Cap), 300+ FPS Mode & 60s Overclock Testing
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-slate-400 leading-relaxed">
             <div>
               <div className="font-semibold text-slate-200 mb-1">
-                01. Verifying 3rd-Party Frame Limiters
+                01. Why Browsers Normally Cap at 120 FPS (V-Sync)
               </div>
               <p>
-                To test tools such as RivaTuner Statistics Server (RTSS), NVIDIA Control Panel Max Frame Rate, or AMD Radeon Chill, target your browser executable or global profile, select your desired FPS cap in the left panel, and switch GPU Stress Intensity to <strong className="text-slate-200">Light</strong>. Check that Current FPS locks within ±0.5 FPS of your target and Frame Jitter stays below ±0.25 ms.
+                Standard HTML5 animations use{' '}
+                <code className="text-cyan-300 font-mono">
+                  requestAnimationFrame
+                </code>
+                , which web browsers lock to your monitor&apos;s refresh rate (e.g., 120 FPS on a 120Hz monitor). FramePulse uses an{' '}
+                <strong className="text-slate-200">
+                  Uncapped MessageChannel + WebGL Flush Loop
+                </strong>{' '}
+                by default so the GPU renders at 300+ FPS without waiting for the 120Hz vertical blank. (Note: if your 3rd-party limiter hooks the browser&apos;s DXGI SwapChain present, you can also launch Chrome/Edge with{' '}
+                <code className="text-slate-300 font-mono">
+                  --disable-frame-rate-limit --disable-gpu-vsync
+                </code>
+                ).
               </p>
             </div>
             <div>
               <div className="font-semibold text-slate-200 mb-1">
-                02. 60-Second GPU Overclock Stability Pass
+                02. Hitting 300+ FPS vs 60s Overclock Stress
               </div>
               <p>
-                Select <strong className="text-slate-200">Balanced</strong> or <strong className="text-slate-200">Heavy</strong> workload intensity, enter your core/memory offset in the Overclock Profile Label box, and click <strong className="text-slate-200">Run 60s Overclock Benchmark</strong>. Compare Average FPS, 1% Lows, and Stutter count against your baseline stock run in the Overclock Log table.
+                Use <strong className="text-slate-200">Ultra-Light</strong> (1–2 shader steps at 25%–50% resolution) to eliminate fragment bottlenecks and hit 300–600+ FPS while testing your 3rd-party FPS limiter. When testing GPU core/VRAM overclocks, switch to{' '}
+                <strong className="text-slate-200">Balanced</strong> or{' '}
+                <strong className="text-slate-200">Heavy (OC)</strong> and click{' '}
+                <strong className="text-slate-200">
+                  Run 60s Overclock Benchmark
+                </strong>
+                .
               </p>
             </div>
             <div>
@@ -1508,7 +1554,11 @@ export default function App() {
                 03. Desktop Responsiveness Protection
               </div>
               <p>
-                Unlike unbounded shader loops that starve the OS desktop compositor (DWM) and freeze the mouse cursor, FramePulse bounds per-frame ray-marching steps to a safe ceiling of 56 iterations and uses an active <strong className="text-slate-200">58 ms Frame-Delta Watchdog</strong> to step down load automatically if frame rate drops below 17 FPS.
+                To ensure heavy GPU stress never makes Windows unresponsive, FramePulse bounds ray-marching to a safe ceiling of 56 steps, yields to browser input events every 18 ms, and uses an active{' '}
+                <strong className="text-slate-200">
+                  58 ms Frame-Delta Watchdog
+                </strong>{' '}
+                to step down shader iterations automatically if frame rate drops below 17 FPS.
               </p>
             </div>
           </div>

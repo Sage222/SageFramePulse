@@ -15,7 +15,6 @@ export const BenchmarkRunHistory: React.FC<BenchmarkRunHistoryProps> = ({
   onExportCsv,
   onDeleteRun,
 }) => {
-  // Baseline run (oldest or first 60s run) for relative delta percentage calculation
   const baselineRun = runs.length > 0 ? runs[runs.length - 1] : null;
 
   return (
@@ -23,10 +22,10 @@ export const BenchmarkRunHistory: React.FC<BenchmarkRunHistoryProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div>
           <h3 className="text-sm font-semibold text-slate-100">
-            Overclock & Frame Limiter Benchmark Log ({runs.length})
+            Overclock & Benchmark Run Log ({runs.length})
           </h3>
           <p className="text-xs text-slate-400">
-            Compare 60-second overclock stability runs and 3rd-party FPS limiter accuracy across clock profiles
+            Compare 60-second overclock stability passes and continuous FPS probe sessions across GPU profiles
           </p>
         </div>
 
@@ -68,8 +67,8 @@ export const BenchmarkRunHistory: React.FC<BenchmarkRunHistoryProps> = ({
               <tr className="border-b border-slate-800 text-[11px] font-mono text-slate-400">
                 <th className="py-2.5 pr-3 font-medium">Profile / Notes</th>
                 <th className="py-2.5 px-3 font-medium">Mode & Load</th>
-                <th className="py-2.5 px-3 font-medium text-right">Target Cap</th>
                 <th className="py-2.5 px-3 font-medium text-right">Avg FPS</th>
+                <th className="py-2.5 px-3 font-medium text-right">Max FPS</th>
                 <th className="py-2.5 px-3 font-medium text-right">1% Low</th>
                 <th className="py-2.5 px-3 font-medium text-right">0.1% Low</th>
                 <th className="py-2.5 px-3 font-medium text-right">Avg Delta</th>
@@ -103,16 +102,12 @@ export const BenchmarkRunHistory: React.FC<BenchmarkRunHistoryProps> = ({
                       <div>
                         {run.mode === 'benchmark_60s'
                           ? '60s OC Stress'
-                          : 'Free Run'}
+                          : 'Free Run'}{' '}
+                        ({run.loopEngine === 'uncapped' ? 'Uncapped' : 'V-Sync'})
                       </div>
                       <div className="text-[11px] text-slate-500">
                         {run.shaderIterations} steps · {Math.round(run.resolutionScale * 100)}% res
                       </div>
-                    </td>
-                    <td className="py-2.5 px-3 text-right text-slate-300">
-                      {run.referenceTargetFps
-                        ? `${run.referenceTargetFps} FPS`
-                        : 'Uncapped'}
                     </td>
                     <td className="py-2.5 px-3 text-right">
                       <span className="font-semibold text-cyan-400">
@@ -130,6 +125,9 @@ export const BenchmarkRunHistory: React.FC<BenchmarkRunHistoryProps> = ({
                           {deltaPercent.toFixed(1)}%
                         </span>
                       )}
+                    </td>
+                    <td className="py-2.5 px-3 text-right text-slate-300">
+                      {run.maxFps.toFixed(0)}
                     </td>
                     <td className="py-2.5 px-3 text-right text-slate-200">
                       {run.low1PercentFps.toFixed(1)}

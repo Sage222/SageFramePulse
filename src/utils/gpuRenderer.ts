@@ -15,8 +15,11 @@ const VERTEX_SHADER_SOURCE = `
   }
 `;
 
-// Carefully calibrated fragment shader that stresses GPU ALU & SFU (Special Function Units)
-// with configurable iteration count and a hard ceiling of 60 steps so OS compositor stays responsive.
+// Calibrated fragment shader:
+// - When u_iterations <= 10 (Ultra-Light & Light modes for 300+ FPS testing), skips expensive 6-tap
+//   3D normal finite differences and uses a fast single-pass analytical wave pass.
+// - When u_iterations > 10 (Balanced & Heavy modes for 60s Overclock testing), runs full 3D ray-marching
+//   or multi-octave trigonometric FBM turbulence bounded at 56 steps so the PC never freezes.
 const FRAGMENT_SHADER_SOURCE = `
   precision highp float;
   varying vec2 v_uv;
@@ -32,7 +35,6 @@ const FRAGMENT_SHADER_SOURCE = `
     return mat2(c, -s, s, c);
   }
 
-  // Signed Distance Field for Scene 0: Volumetric Gyroid Lattice
   float mapLattice(vec3 p, float t) {
     vec3 q = p;
     q.xy *= rot(t * 0.15);
@@ -43,7 +45,6 @@ const FRAGMENT_SHADER_SOURCE = `
     return mix(gyroid - 0.08, box, 0.35);
   }
 
-  // Signed Distance Field for Scene 2: Geometric Matrix Prisms
   float mapMatrix(vec3 p, float t) {
     vec3 q = p;
     q.xz *= rot(t * 0.12);
@@ -59,7 +60,33 @@ const FRAGMENT_SHADER_SOURCE = `
     vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
     float t = u_time;
 
-    // Scene 1: Plasma Manifold (ALU & Trigonometric FBM Heavy Stress)
+    // Fast High-FPS Path (1 to 10 steps): skips 6-tap normal finite differences
+    // so GPU can easily achieve 300 - 1000+ FPS for testing external FPS limiters.
+    if (u_iterations <= 10) {
+      vec3 col = vec3(0.03, 0.05, 0.09);
+      vec2 p = uv * 2.4;
+      for (int i = 0; i < 10; i++) {
+        if (i >= u_iterations) break;
+        float fi = float(i) + 1.0;
+        p = vec2(
+          p.x * cos(0.35) - p.y * sin(0.35) + sin(t * 1.4 + p.y * 1.8) * 0.25,
+          p.x * sin(0.35) + p.y * cos(0.35) + cos(t * 1.1 + p.x * 1.8) * 0.25
+        );
+        float w = abs(sin(p.x * 3.0 + t) * cos(p.y * 3.0 - t));
+        vec3 tint = (u_scene == 0)
+          ? vec3(0.04, 0.72, 0.92)
+          : (u_scene == 1)
+          ? vec3(0.25, 0.55, 0.98)
+          : vec3(0.95, 0.62, 0.12);
+        col += tint * (0.045 / (0.06 + w * 0.8)) / fi;
+      }
+      float ring = smoothstep(0.006, 0.001, abs(length(uv) - 0.36));
+      col += vec3(0.06, 0.78, 0.92) * ring * 0.25;
+      gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+      return;
+    }
+
+    // Scene 1: Plasma Manifold (ALU & Trigonometric FBM Stress for Overclocking)
     if (u_scene == 1) {
       vec3 accColor = vec3(0.0);
       vec2 p = uv * 2.2;
@@ -82,14 +109,11 @@ const FRAGMENT_SHADER_SOURCE = `
       }
 
       accColor /= max(float(u_iterations) * 0.32, 1.0);
-      // Subtle grid calibration overlay
-      float grid = smoothstep(0.97, 0.995, max(cos(uv.x * float(u_subdivisions) * 0.15), cos(uv.y * float(u_subdivisions) * 0.15)));
-      accColor = mix(accColor, vec3(0.02, 0.71, 0.83), grid * 0.12);
       gl_FragColor = vec4(pow(clamp(accColor, 0.0, 1.0), vec3(0.92)), 1.0);
       return;
     }
 
-    // Scene 0 & 2: Ray-Marched 3D Shader Workload
+    // Scene 0 & 2: Ray-Marched 3D Shader Workload (11 to 56 steps)
     vec3 ro = vec3(0.0, 0.0, -3.2 + sin(t * 0.4) * 0.3);
     vec3 rd = normalize(vec3(uv, 1.15));
     rd.xy *= rot(sin(t * 0.2) * 0.15);
@@ -103,7 +127,6 @@ const FRAGMENT_SHADER_SOURCE = `
       vec3 p = ro + rd * totalDist;
       float d = (u_scene == 0) ? mapLattice(p, t) : mapMatrix(p, t);
 
-      // Accumulate volumetric energy per step (forces ALU evaluation every step)
       float fi = float(i);
       vec3 stepTint = (u_scene == 0)
         ? vec3(0.03, 0.68, 0.88) + 0.25 * cos(vec3(1.0, 2.0, 3.0) + p.z * 0.8 + t)
@@ -119,41 +142,32 @@ const FRAGMENT_SHADER_SOURCE = `
       if (totalDist > 14.0) break;
     }
 
-    vec3 pHit = ro + rd * totalDist;
-    // Normal estimation
-    vec2 e = vec2(0.004, 0.0);
-    vec3 n;
-    if (u_scene == 0) {
-      n = normalize(vec3(
-        mapLattice(pHit + e.xyy, t) - mapLattice(pHit - e.xyy, t),
-        mapLattice(pHit + e.yxy, t) - mapLattice(pHit - e.yxy, t),
-        mapLattice(pHit + e.yyx, t) - mapLattice(pHit - e.yyx, t)
-      ));
-    } else {
-      n = normalize(vec3(
-        mapMatrix(pHit + e.xyy, t) - mapMatrix(pHit - e.xyy, t),
-        mapMatrix(pHit + e.yxy, t) - mapMatrix(pHit - e.yxy, t),
-        mapMatrix(pHit + e.yyx, t) - mapMatrix(pHit - e.yyx, t)
-      ));
-    }
-
-    vec3 lightDir = normalize(vec3(sin(t * 0.7), 0.8, -0.9));
-    float diff = max(dot(n, lightDir), 0.0);
-    float spec = pow(max(dot(reflect(-lightDir, n), -rd), 0.0), 24.0);
-
     vec3 baseCol = vec3(0.03, 0.05, 0.09);
     vec3 surfCol = (u_scene == 0)
-      ? vec3(0.06, 0.52, 0.78) * diff + vec3(0.35, 0.88, 1.0) * spec
-      : vec3(0.15, 0.38, 0.82) * diff + vec3(0.96, 0.62, 0.04) * spec * 0.8;
+      ? vec3(0.06, 0.58, 0.86)
+      : vec3(0.22, 0.48, 0.92);
+
+    // Only compute 6-tap surface normal lighting when hit > 0 and iterations >= 24
+    if (hit > 0.01 && u_iterations >= 24) {
+      vec3 pHit = ro + rd * totalDist;
+      vec2 e = vec2(0.004, 0.0);
+      vec3 n = (u_scene == 0)
+        ? normalize(vec3(
+            mapLattice(pHit + e.xyy, t) - mapLattice(pHit - e.xyy, t),
+            mapLattice(pHit + e.yxy, t) - mapLattice(pHit - e.yxy, t),
+            mapLattice(pHit + e.yyx, t) - mapLattice(pHit - e.yyx, t)
+          ))
+        : normalize(vec3(
+            mapMatrix(pHit + e.xyy, t) - mapMatrix(pHit - e.xyy, t),
+            mapMatrix(pHit + e.yxy, t) - mapMatrix(pHit - e.yxy, t),
+            mapMatrix(pHit + e.yyx, t) - mapMatrix(pHit - e.yyx, t)
+          ));
+      vec3 lightDir = normalize(vec3(sin(t * 0.7), 0.8, -0.9));
+      float diff = max(dot(n, lightDir), 0.15);
+      surfCol *= diff * 1.35;
+    }
 
     vec3 finalCol = mix(baseCol, surfCol, hit) + glow * 0.55;
-
-    // Fine telemetry reticle overlay inside shader
-    float ring = abs(length(uv) - 0.38);
-    float reticle = smoothstep(0.003, 0.0005, ring) * 0.14;
-    finalCol += vec3(0.02, 0.71, 0.83) * reticle;
-
-    // Tone mapping
     finalCol = finalCol / (1.0 + finalCol * 0.45);
     gl_FragColor = vec4(pow(clamp(finalCol, 0.0, 1.0), vec3(0.9)), 1.0);
   }
@@ -187,6 +201,7 @@ export class GpuBenchmarkRenderer {
       antialias: false,
       depth: false,
       stencil: false,
+      desynchronized: true, // Bypasses compositor queue latency where supported
       powerPreference: 'high-performance',
       preserveDrawingBuffer: false,
     };
@@ -293,9 +308,9 @@ export class GpuBenchmarkRenderer {
   }
 
   public resize(displayWidth: number, displayHeight: number, resolutionScale: number): { width: number; height: number } {
-    const clampedScale = Math.max(0.25, Math.min(1.5, resolutionScale));
-    const targetW = Math.max(320, Math.floor(displayWidth * clampedScale));
-    const targetH = Math.max(200, Math.floor(displayHeight * clampedScale));
+    const clampedScale = Math.max(0.2, Math.min(1.25, resolutionScale));
+    const targetW = Math.max(200, Math.floor(displayWidth * clampedScale));
+    const targetH = Math.max(120, Math.floor(displayHeight * clampedScale));
 
     if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
       this.canvas.width = targetW;
@@ -313,8 +328,7 @@ export class GpuBenchmarkRenderer {
    * Renders a calm, zero-stress standby frame when the benchmark is STOPPED.
    */
   public renderStandbyFrame(scene: ShaderSceneType, iterations: number): void {
-    // Render a single static preview frame at minimal iteration depth (6 steps) so GPU stays idle
-    this.renderFrame(2.4, Math.min(8, iterations), scene, 120);
+    this.renderFrame(2.4, Math.min(4, iterations), scene, 100);
   }
 
   /**
@@ -326,7 +340,7 @@ export class GpuBenchmarkRenderer {
     scene: ShaderSceneType,
     subdivisions: number
   ): void {
-    const safeIterations = Math.max(4, Math.min(56, Math.round(iterations)));
+    const safeIterations = Math.max(1, Math.min(56, Math.round(iterations)));
     const sceneIndex =
       scene === 'volumetric_lattice' ? 0 : scene === 'plasma_manifold' ? 1 : 2;
 
@@ -339,6 +353,7 @@ export class GpuBenchmarkRenderer {
       gl.uniform1i(this.uScene, sceneIndex);
       gl.uniform1i(this.uSubdivisions, subdivisions);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.flush();
       return;
     }
 
@@ -351,7 +366,7 @@ export class GpuBenchmarkRenderer {
 
       const cx = w * 0.5;
       const cy = h * 0.5;
-      const rings = safeIterations * 2;
+      const rings = Math.max(2, safeIterations);
       for (let i = 0; i < rings; i++) {
         const ratio = i / rings;
         const radius = ratio * Math.min(w, h) * 0.45;

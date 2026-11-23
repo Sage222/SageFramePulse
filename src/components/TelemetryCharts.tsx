@@ -6,7 +6,6 @@ import {
 
 interface TelemetryChartsProps {
   history: FrameTimeHistoryPoint[];
-  referenceTargetFps: number | null;
   buckets: FrameDistributionBuckets;
   totalFrames: number;
   currentFps: number;
@@ -15,7 +14,6 @@ interface TelemetryChartsProps {
 
 export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({
   history,
-  referenceTargetFps,
   buckets,
   totalFrames,
   currentFps,
@@ -24,16 +22,15 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [chartMetric, setChartMetric] = useState<'fps' | 'frametime'>('fps');
 
-  // Determine vertical scale dynamically
+  // Determine vertical scale dynamically up to 300 - 1000+ FPS
   const maxObservedFps = history.reduce((m, p) => Math.max(m, p.fps), 0);
   const maxFpsScale = Math.max(
-    120,
-    referenceTargetFps ? referenceTargetFps * 1.25 : 144,
-    Math.ceil((maxObservedFps * 1.15) / 30) * 30
+    300,
+    Math.ceil((maxObservedFps * 1.15) / 50) * 50
   );
 
   const maxObservedMs = history.reduce((m, p) => Math.max(m, p.frameTimeMs), 0);
-  const maxMsScale = Math.max(35, Math.ceil((maxObservedMs * 1.2) / 10) * 10);
+  const maxMsScale = Math.max(25, Math.ceil((maxObservedMs * 1.2) / 5) * 5);
 
   const width = 680;
   const height = 165;
@@ -70,25 +67,6 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({
           1
         )} L ${padLeft.toFixed(1)} ${(padTop + plotH).toFixed(1)} Z`
       : '';
-
-  // Reference line y-coordinate
-  let referenceY: number | null = null;
-  let referenceLabel = '';
-  if (referenceTargetFps && referenceTargetFps > 0) {
-    if (chartMetric === 'fps') {
-      if (referenceTargetFps <= maxFpsScale) {
-        referenceY =
-          padTop + plotH - (referenceTargetFps / maxFpsScale) * plotH;
-        referenceLabel = `TARGET CAP: ${referenceTargetFps} FPS`;
-      }
-    } else {
-      const targetMs = 1000 / referenceTargetFps;
-      if (targetMs <= maxMsScale) {
-        referenceY = padTop + plotH - (targetMs / maxMsScale) * plotH;
-        referenceLabel = `TARGET PACE: ${targetMs.toFixed(2)} ms`;
-      }
-    }
-  }
 
   const bucketList = [
     {
@@ -137,15 +115,10 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
           <div>
             <h3 className="text-sm font-semibold text-slate-100">
-              Real-Time Frame Pacing Oscilloscope
+              Real-Time Frame Rate & Frame Time Oscilloscope
             </h3>
             <p className="text-xs text-slate-400">
-              Rolling telemetry trace ({history.length} samples)
-              {referenceTargetFps
-                ? ` · 3rd-Party Limiter Reference: ${referenceTargetFps} FPS (${(
-                    1000 / referenceTargetFps
-                  ).toFixed(2)} ms)`
-                : ' · No FPS Cap Reference Selected'}
+              Rolling high-frequency telemetry waveform ({history.length} samples) · Zero internal FPS limits
             </p>
           </div>
 
@@ -231,38 +204,6 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({
                 </g>
               );
             })}
-
-            {/* Target FPS Reference Line */}
-            {referenceY !== null && (
-              <g>
-                <line
-                  x1={padLeft}
-                  y1={referenceY}
-                  x2={padLeft + plotW}
-                  y2={referenceY}
-                  stroke="#10B981"
-                  strokeWidth="1.5"
-                  strokeDasharray="5 4"
-                />
-                <rect
-                  x={padLeft + 6}
-                  y={Math.max(2, referenceY - 16)}
-                  width={142}
-                  height={15}
-                  rx="2"
-                  fill="#07090E"
-                  stroke="#10B981"
-                  strokeWidth="0.75"
-                />
-                <text
-                  x={padLeft + 11}
-                  y={Math.max(12, referenceY - 5)}
-                  className="fill-emerald-400 text-[9.5px] font-mono font-semibold"
-                >
-                  {referenceLabel}
-                </text>
-              </g>
-            )}
 
             {/* Area & Line Path */}
             {history.length > 1 && (
@@ -373,7 +314,7 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({
             </span>
           </div>
           <p className="text-xs text-slate-400 mb-3">
-            Frame-time consistency breakdown for verifying 3rd-party limiter lock
+            Frame-time breakdown across ultra-high and standard refresh tiers
           </p>
 
           <div className="space-y-2.5">
@@ -404,8 +345,8 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({
         </div>
 
         <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 font-mono">
-          <span>60 Hz Budget: 16.67 ms</span>
-          <span>144 Hz Budget: 6.94 ms</span>
+          <span>120 Hz: 8.33 ms</span>
+          <span>300 Hz: 3.33 ms</span>
         </div>
       </div>
     </div>

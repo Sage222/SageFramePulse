@@ -1,20 +1,22 @@
 export type BenchmarkMode = 'free_run' | 'benchmark_60s';
 
-export type WorkloadPreset = 'light' | 'balanced' | 'heavy' | 'custom';
+export type WorkloadPreset = 'ultralight' | 'light' | 'balanced' | 'heavy' | 'custom';
 
 export type ShaderSceneType = 'volumetric_lattice' | 'plasma_manifold' | 'geometric_matrix';
 
 export type BenchmarkStatus = 'stopped' | 'running' | 'completed';
 
+export type LoopTimingEngine = 'uncapped' | 'vsync_raf';
+
 export interface BenchmarkConfig {
   mode: BenchmarkMode;
+  loopEngine: LoopTimingEngine; // 'uncapped' uses MessageChannel to bypass 120Hz monitor V-Sync
   preset: WorkloadPreset;
   scene: ShaderSceneType;
-  shaderIterations: number; // 8 to 56 steps per pixel
-  resolutionScale: number; // 0.5 to 1.25
-  geometrySubdivisions: number; // 100 to 1200 overlays
-  referenceTargetFps: number | null; // Target cap being tested in 3rd-party tool (e.g., 60, 120, 144, 165, 240)
-  watchdogEnabled: boolean; // Prevents desktop freeze if frame time > 65ms
+  shaderIterations: number; // 1 to 56 steps per pixel
+  resolutionScale: number; // 0.25 to 1.0
+  geometrySubdivisions: number;
+  watchdogEnabled: boolean; // Prevents desktop freeze if frame time > 58ms
   clockProfileLabel: string; // e.g. "Stock Profile" or "+135 MHz Core / +400 MHz Mem"
 }
 
@@ -26,11 +28,11 @@ export interface FrameTimeHistoryPoint {
 }
 
 export interface FrameDistributionBuckets {
-  under4ms: number;    // > 250 FPS
-  ms4to8: number;      // 125 - 250 FPS
-  ms8to16_7: number;   // 60 - 125 FPS
-  ms16_7to33_3: number;// 30 - 60 FPS
-  over33_3ms: number;  // < 30 FPS
+  under4ms: number;     // > 250 FPS
+  ms4to8: number;       // 125 - 250 FPS
+  ms8to16_7: number;    // 60 - 125 FPS
+  ms16_7to33_3: number; // 30 - 60 FPS
+  over33_3ms: number;   // < 30 FPS
 }
 
 export interface LiveTelemetry {
@@ -43,8 +45,6 @@ export interface LiveTelemetry {
   low1PercentFps: number;
   low01PercentFps: number;
   frameJitterMs: number;
-  limiterDeviationFps: number | null;
-  limiterPacingStatus: 'Locked' | 'Uncapped / Above Target' | 'GPU Bound / Below Target' | 'Unset';
   totalFrames: number;
   stutterEvents: number;
   elapsedSeconds: number;
@@ -64,6 +64,7 @@ export interface BenchmarkRunRecord {
   id: string;
   timestamp: string;
   mode: BenchmarkMode;
+  loopEngine: LoopTimingEngine;
   durationSeconds: number;
   completedFull60s: boolean;
   clockProfileLabel: string;
@@ -71,7 +72,6 @@ export interface BenchmarkRunRecord {
   scene: ShaderSceneType;
   shaderIterations: number;
   resolutionScale: number;
-  referenceTargetFps: number | null;
   avgFps: number;
   minFps: number;
   maxFps: number;
@@ -82,5 +82,4 @@ export interface BenchmarkRunRecord {
   totalFrames: number;
   stutterEvents: number;
   watchdogTriggers: number;
-  pacingConsistencyPercent: number;
 }
