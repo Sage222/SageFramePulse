@@ -1,0 +1,6 @@
+{
+  "name": "FramePulse HTML5 GPU & FPS Benchmark",
+  "description": "Precision HTML5 WebGL2 benchmark instrument for testing third-party FPS limiters, frame-time pacing, and 60-second GPU overclock stability with responsiveness protection.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
